@@ -204,8 +204,9 @@ const Pedidos = () => {
             <div className="space-y-2">
               {reservados.map((p) => {
                 const isPaidNotDelivered = p.status === 'pago' && !p.data_entrega;
+                const canBeDelivered = !p.data_entrega;
                 return (
-                  <div key={p.id} className={`card-elevated p-4 ${isPaidNotDelivered ? 'border-2 border-success' : ''}`}>
+                  <div key={p.id} className={`card-elevated p-4 ${isPaidNotDelivered ? 'border-2 border-destructive' : ''}`}>
                     {editPvId === p.id ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-3">
@@ -234,6 +235,11 @@ const Pedidos = () => {
                               </span>
                               <span className="text-xs text-muted-foreground">📅 {p.data_pedido}</span>
                               <span className="text-xs text-muted-foreground">Qtd: {p.quantidade}</span>
+                              {isPaidNotDelivered && (
+                                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-destructive/20 text-destructive">
+                                  🚨 Pedido já pago!
+                                </span>
+                              )}
                               {isOverdue(p.data_pedido) && p.status !== 'pago' && (
                                 <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-destructive/20 text-destructive">
                                   ⚠️ +10 dias
@@ -244,7 +250,7 @@ const Pedidos = () => {
                           <p className="font-bold text-primary text-lg">{fmt(p.valor_total)}</p>
                         </div>
                         <div className="flex items-center gap-2 mt-2 border-t border-border pt-2">
-                          {p.status === 'pendente' && (
+                          {canBeDelivered && (
                             <button onClick={() => entregarPreVenda(p.id)} className="text-sm font-semibold text-primary bg-accent px-3 py-1.5 rounded-lg">
                               📦 Entregar
                             </button>
