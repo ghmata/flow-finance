@@ -125,7 +125,13 @@ export const useStore = create<AppState>()(
       entregarPreVenda: (id) =>
         set((s) => ({
           pedidosPreVenda: s.pedidosPreVenda.map((p) =>
-            p.id === id ? { ...p, status: 'entregue' as const, data_entrega: today() } : p
+            p.id === id
+              ? {
+                  ...p,
+                  status: p.status === 'pago' ? ('pago' as const) : ('entregue' as const),
+                  data_entrega: today(),
+                }
+              : p
           ),
         })),
 
