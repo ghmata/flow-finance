@@ -210,7 +210,7 @@ export const useStore = create<AppState>()(
         const map = new Map<string, DevedorAgrupado>();
 
         state.pedidosPreVenda
-          .filter((p) => p.status === 'entregue')
+          .filter((p) => p.status === 'pendente' || p.status === 'entregue')
           .forEach((p) => {
             const cliente = state.clientes.find((c) => c.id === p.cliente_id);
             if (!cliente) return;
