@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const tabs = [
   { path: '/', label: 'Início', emoji: '📊' },
   { path: '/clientes', label: 'Clientes', emoji: '👥' },
-  { path: '/devedores', label: 'Devedores', emoji: '💰' },
-  { path: '/pedidos', label: 'Pedidos', emoji: '📦' },
+  { path: '/devedores', label: 'A Receber', emoji: '💰' },
+  { path: '/pedidos', label: 'Vendas', emoji: '🛒' },
   { path: '/orcamento', label: 'Orçamento', emoji: '💸' },
 ];
 

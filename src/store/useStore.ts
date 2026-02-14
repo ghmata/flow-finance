@@ -39,9 +39,11 @@ interface AppState {
   // Pré-venda
   addPreVenda: (cliente_id: string, produto_id: string, quantidade: number) => void;
   entregarPreVenda: (id: string) => void;
+  deletePreVenda: (id: string) => void;
 
   // Pós-venda
   addPosVenda: (cliente_id: string, descricao: string, quantidade: number, valor_total: number) => void;
+  deletePosVenda: (id: string) => void;
 
   // Pagamento
   registrarPagamento: (tipo: 'prevenda' | 'posvenda', referencia_id: string, forma_pagamento: string) => void;
@@ -113,6 +115,12 @@ export const useStore = create<AppState>()(
           ],
         }));
       },
+
+      deletePreVenda: (id) =>
+        set((s) => ({ pedidosPreVenda: s.pedidosPreVenda.filter((p) => p.id !== id) })),
+
+      deletePosVenda: (id) =>
+        set((s) => ({ registrosPosVenda: s.registrosPosVenda.filter((r) => r.id !== id) })),
 
       entregarPreVenda: (id) =>
         set((s) => ({
