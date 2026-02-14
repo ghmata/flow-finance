@@ -1,10 +1,12 @@
 import { useStore } from '@/store/useStore';
+import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
 const Dashboard = () => {
   const { clientes, pedidosPreVenda, registrosPosVenda, pagamentos, despesas, receitas, getDevedores } = useStore();
+  const navigate = useNavigate();
   const devedores = getDevedores();
 
   const totalDevedores = devedores.reduce((acc, d) => acc + d.total, 0);
@@ -16,14 +18,12 @@ const Dashboard = () => {
 
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
-  // Despesas por categoria
   const despPorCat = despesas.reduce<Record<string, number>>((acc, d) => {
     acc[d.categoria] = (acc[d.categoria] || 0) + d.valor;
     return acc;
   }, {});
   const pieData = Object.entries(despPorCat).map(([name, value]) => ({ name, value }));
 
-  // Últimos 4 meses receitas vs despesas
   const now = new Date();
   const barData = Array.from({ length: 4 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (3 - i), 1);
@@ -34,9 +34,17 @@ const Dashboard = () => {
     return { mes: mesLabel, receitas: rec, despesas: desp };
   });
 
+  const quickActions = [
+    { label: '📦 Nova Reserva', action: () => navigate('/pedidos', { state: { tab: 'prevenda' } }) },
+    { label: '🛒 Nova Pronta Entrega', action: () => navigate('/pedidos', { state: { tab: 'posvenda' } }) },
+    { label: '💸 Nova Despesa', action: () => navigate('/orcamento', { state: { tab: 'despesas' } }) },
+    { label: '🍰 Cadastrar Produto', action: () => navigate('/pedidos', { state: { tab: 'produtos' } }) },
+    { label: '👤 Cadastrar Cliente', action: () => navigate('/clientes', { state: { showForm: true } }) },
+  ];
+
   return (
     <div className="page-container">
-      <h1 className="page-title">📊 Dashboard</h1>
+      <h1 className="page-title">📊 Início</h1>
 
       <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="card-elevated p-4">
@@ -52,7 +60,7 @@ const Dashboard = () => {
         <div className="card-elevated p-4">
           <p className="text-sm text-muted-foreground">📦 Pendentes</p>
           <p className="text-xl font-bold text-warning">{pedidosPendentes}</p>
-          <p className="text-xs text-muted-foreground">pedidos pré-venda</p>
+          <p className="text-xs text-muted-foreground">reservas pendentes</p>
         </div>
         <div className="card-elevated p-4">
           <p className="text-sm text-muted-foreground">📊 Saldo</p>
@@ -60,6 +68,22 @@ const Dashboard = () => {
             {fmt(saldo)}
           </p>
           <p className="text-xs text-muted-foreground">receitas - despesas</p>
+        </div>
+      </div>
+
+      {/* Ações Rápidas */}
+      <div className="card-elevated p-4 mb-6">
+        <h3 className="font-bold mb-3">⚡ Ações Rápidas</h3>
+        <div className="grid grid-cols-2 gap-2">
+          {quickActions.map((qa) => (
+            <button
+              key={qa.label}
+              onClick={qa.action}
+              className="bg-accent text-accent-foreground font-semibold py-3 px-3 rounded-xl text-sm active:scale-95 transition-transform text-left"
+            >
+              {qa.label}
+            </button>
+          ))}
         </div>
       </div>
 
