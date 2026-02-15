@@ -308,7 +308,7 @@ const Pedidos = () => {
             return (
               <Dialog open={showPvForm} onOpenChange={setShowPvForm}>
                 <DialogContent
-                  className="w-[calc(100vw-24px)] max-w-[calc(100vw-24px)] overflow-x-hidden overflow-y-auto max-h-[85vh] p-4 sm:max-w-lg sm:p-6"
+                  className="w-[calc(100vw-24px)] max-w-[calc(100vw-24px)] rounded-2xl overflow-x-hidden overflow-y-auto max-h-[85vh] p-4 sm:max-w-lg sm:rounded-2xl sm:p-6"
                   onOpenAutoFocus={(event) => {
                     event.preventDefault();
                     novaReservaTitleRef.current?.focus();
