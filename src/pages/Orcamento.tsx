@@ -2,31 +2,62 @@ import { useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { CATEGORIAS_DESPESA, CATEGORIAS_RECEITA } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { Card, CardContent } from '@/components/ui/card';
+import { User, TrendingUp, Calendar, CalendarOff, ShoppingBag, ChevronLeft, ChevronRight, Wallet, CreditCard } from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
+import { formatCurrency, parseCurrency } from '@/utils/masks';
 
 type OrcTab = 'resumo' | 'receitas' | 'despesas';
 
-const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#84CC16', '#E11D48', '#6366F1', '#14B8A6'];
+const CHART_COLORS = [
+  'hsl(var(--primary))',
+  'hsl(var(--success))',
+  'hsl(var(--warning))',
+  'hsl(var(--destructive))',
+  'hsl(var(--accent-foreground))', // approximate purple
+  '#EC4899', // pink-500
+  '#06B6D4', // cyan-500
+];
 
-function getWeeksOfMonth(year: number, month: number) {
-  const first = new Date(year, month, 1);
-  const last = new Date(year, month + 1, 0);
-  const weeks: { numero: number; inicio: Date; fim: Date; label: string }[] = [];
-  let cur = new Date(first);
-  let n = 1;
-  while (cur <= last) {
-    const end = new Date(cur);
-    end.setDate(cur.getDate() + 6);
-    const fim = end > last ? last : end;
-    const fmtD = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
-    weeks.push({ numero: n, inicio: new Date(cur), fim, label: `Semana ${n} (${fmtD(cur)}-${fmtD(fim)})` });
-    cur.setDate(cur.getDate() + 7);
-    n++;
-  }
-  return weeks;
-}
+  // Fix date parsing to be consistent using string comparison where possible or ensuring local time
+  const parseDateLocal = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  const getWeeksOfMonth = (year: number, month: number) => {
+    const first = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const last = new Date(year, month, 0, 23, 59, 59, 999);
+    const weeks: { numero: number; inicio: Date; fim: Date; label: string }[] = [];
+    
+    let cur = new Date(first);
+    let n = 1;
+    
+    while (cur <= last) {
+      const startOfWeek = new Date(cur);
+      const endOfWeek = new Date(cur);
+      endOfWeek.setDate(cur.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+      
+      const fim = endOfWeek > last ? last : endOfWeek;
+      const fmtD = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+      
+      weeks.push({ 
+        numero: n, 
+        inicio: startOfWeek, 
+        fim, 
+        label: `Semana ${n} (${fmtD(startOfWeek)}-${fmtD(fim)})` 
+      });
+      
+      cur.setDate(cur.getDate() + 7);
+      n++;
+    }
+    return weeks;
+  };
 
 const Orcamento = () => {
-  const { despesas, receitas, pagamentos, clientes, addDespesa, deleteDespesa, addReceitaManual } = useStore();
+  const { despesas, receitas, clientes, pedidosPreVenda, registrosPosVenda, addDespesa, deleteDespesa, addReceitaManual } = useStore();
   const [tab, setTab] = useState<OrcTab>('resumo');
   const [selectedDate, setSelectedDate] = useState(() => {
     const now = new Date();
@@ -58,7 +89,7 @@ const Orcamento = () => {
 
   const [year, month] = selectedDate.split('-').map(Number);
   const mesKey = selectedDate;
-  const weeks = useMemo(() => getWeeksOfMonth(year, month - 1), [year, month]);
+  const weeks = useMemo(() => getWeeksOfMonth(year, month), [year, month]);
 
   const despMes = despesas.filter((d) => d.data_despesa.startsWith(mesKey));
   const recMes = receitas.filter((r) => r.data_receita.startsWith(mesKey));
@@ -69,25 +100,43 @@ const Orcamento = () => {
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
   const getEmojiCat = (cat: string) => CATEGORIAS_DESPESA.find((c) => c.nome === cat)?.emoji || '📌';
 
-  const handleAddDespesa = (e: React.FormEvent) => {
+  const [isSubmittingDesp, setIsSubmittingDesp] = useState(false);
+
+  const handleAddDespesa = async (e: React.FormEvent) => {
     e.preventDefault();
-    const v = parseFloat(dValor.replace(',', '.'));
+    const v = parseCurrency(dValor);
     if (!dDesc.trim() || !dCat || isNaN(v) || v <= 0) return;
-    addDespesa({ descricao: dDesc.trim(), categoria: dCat, valor: v, data_despesa: dData, status: dStatus });
-    setDDesc(''); setDValor(''); setDCat(''); setShowDespForm(false);
+    
+    setIsSubmittingDesp(true);
+    try {
+      await addDespesa({ descricao: dDesc.trim(), categoria: dCat, valor: v, data_despesa: dData, status: dStatus });
+      setDDesc(''); setDValor(''); setDCat(''); setShowDespForm(false);
+    } finally {
+      setIsSubmittingDesp(false);
+    }
   };
 
-  const handleAddReceita = (e: React.FormEvent) => {
+  const [isSubmittingRec, setIsSubmittingRec] = useState(false);
+
+  const handleAddReceita = async (e: React.FormEvent) => {
     e.preventDefault();
-    const v = parseFloat(rValor.replace(',', '.'));
+    const v = parseCurrency(rValor);
     if (!rDesc.trim() || isNaN(v) || v <= 0) return;
-    addReceitaManual({ descricao: rDesc.trim(), categoria: rCat, valor: v, data_receita: rData });
-    setRDesc(''); setRValor(''); setShowRecForm(false);
+
+    setIsSubmittingRec(true);
+    try {
+      await addReceitaManual({ descricao: rDesc.trim(), categoria: rCat, valor: v, data_receita: rData });
+      setRDesc(''); setRValor(''); setShowRecForm(false);
+    } finally {
+      setIsSubmittingRec(false);
+    }
   };
 
   const barData = weeks.map((w) => {
     const inWeek = (dateStr: string) => {
-      const d = new Date(dateStr);
+      const d = parseDateLocal(dateStr);
+      // Set to midday to avoid edge cases or use exact comparison
+      // But simple comparison should work if parseDateLocal is correct
       return d >= w.inicio && d <= w.fim;
     };
     return {
@@ -103,17 +152,56 @@ const Orcamento = () => {
   }, {});
   const pieData = Object.entries(despPorCat).map(([name, value]) => ({ name, value }));
 
-  // Top 3 clients by total spent
-  const topClientes = useMemo(() => {
-    const clienteTotals = new Map<string, number>();
-    pagamentos.forEach((p) => {
-      clienteTotals.set(p.cliente_id, (clienteTotals.get(p.cliente_id) || 0) + p.valor_pago);
+  // Computed Top List based on selected month (Consistency with Dashboard)
+  const { top3Compradores, top3Produtos } = useMemo(() => {
+    // 1. Filter transactions by selected Month
+    const pedidosMes = [
+        ...pedidosPreVenda.filter(p => p.data_pedido.startsWith(mesKey)),
+        ...registrosPosVenda.filter(p => p.data_registro.startsWith(mesKey))
+    ];
+
+    // Top Compradores
+    const mapClientes = new Map<string, { nome: string; total: number; qtd: number }>(); // Added qtd
+    pedidosMes.forEach(p => {
+        const cNome = clientes.find(c => c.id === p.cliente_id)?.nome || 'Desconhecido';
+        if (!mapClientes.has(p.cliente_id)) {
+            mapClientes.set(p.cliente_id, { nome: cNome, total: 0, qtd: 0 }); // Init qtd
+        }
+        const entry = mapClientes.get(p.cliente_id)!;
+        entry.total += p.valor_total;
+        entry.qtd += 1; // Increment qtd
     });
-    return Array.from(clienteTotals.entries())
-      .map(([id, total]) => ({ nome: clientes.find((c) => c.id === id)?.nome || 'Desconhecido', total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 3);
-  }, [pagamentos, clientes]);
+
+    // Top Produtos (Only from PreVenda)
+    const pedidosProdutosMes = pedidosPreVenda.filter(p => p.data_pedido.startsWith(mesKey));
+    const mapProdutos = new Map<string, { nome: string; quantidade: number }>();
+    const { produtos } = useStore.getState(); // helper to get products, or use from props
+    
+    pedidosProdutosMes.forEach(p => {
+        const itens = p.itens || [];
+        // Fallback for legacy
+        if (itens.length === 0 && p.produto_id) {
+             const prod = produtos.find(pr => pr.id === p.produto_id);
+             const pNome = prod?.nome_sabor || 'Desconhecido';
+             if (!mapProdutos.has(p.produto_id)) {
+                 mapProdutos.set(p.produto_id, { nome: pNome, quantidade: 0 });
+             }
+             mapProdutos.get(p.produto_id)!.quantidade += p.quantidade;
+        } else {
+            itens.forEach(item => {
+                 if (!mapProdutos.has(item.produto_id)) {
+                     mapProdutos.set(item.produto_id, { nome: item.produto_nome, quantidade: 0 });
+                 }
+                 mapProdutos.get(item.produto_id)!.quantidade += item.quantidade;
+            });
+        }
+    });
+
+    return {
+        top3Compradores: Array.from(mapClientes.values()).sort((a,b) => b.total - a.total).slice(0, 3),
+        top3Produtos: Array.from(mapProdutos.values()).sort((a,b) => b.quantidade - a.quantidade).slice(0, 3)
+    };
+  }, [pedidosPreVenda, registrosPosVenda, clientes, mesKey]);
 
   const tabs: { key: OrcTab; label: string }[] = [
     { key: 'resumo', label: '📊 Resumo' },
@@ -121,7 +209,7 @@ const Orcamento = () => {
     { key: 'despesas', label: '💸 Despesas' },
   ];
 
-  const mesLabel = new Date(year, month - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const mesLabel = new Date(year, month - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   const prevMonth = () => {
     const d = new Date(year, month - 2, 1);
@@ -137,10 +225,24 @@ const Orcamento = () => {
       <h1 className="page-title">📊 Orçamento</h1>
 
       {/* Month selector */}
-      <div className="flex items-center justify-between mb-4 card-elevated p-3">
-        <button onClick={prevMonth} className="text-2xl p-2 text-muted-foreground">‹</button>
-        <p className="font-bold text-lg capitalize">{mesLabel}</p>
-        <button onClick={nextMonth} className="text-2xl p-2 text-muted-foreground">›</button>
+      <div className="flex items-center justify-between bg-card text-card-foreground p-3 rounded-lg shadow-sm border mb-4">
+        <button 
+          onClick={prevMonth} 
+          className="p-3 hover:bg-muted rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+          aria-label="Mês anterior"
+        >
+          <ChevronLeft className="h-6 w-6" />
+        </button>
+        <h2 className="text-lg font-bold capitalize">
+          {mesLabel}
+        </h2>
+        <button 
+          onClick={nextMonth} 
+          className="p-3 hover:bg-muted rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+          aria-label="Próximo mês"
+        >
+          <ChevronRight className="h-6 w-6" />
+        </button>
       </div>
 
       <div className="flex gap-1 mb-5 bg-muted rounded-xl p-1">
@@ -186,8 +288,8 @@ const Orcamento = () => {
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `R$${v}`} />
                   <Tooltip formatter={(v: number) => fmt(v)} />
                   <Legend />
-                  <Bar dataKey="Receitas" fill="#10B981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Despesas" fill="#EF4444" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Receitas" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Despesas" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -202,7 +304,7 @@ const Orcamento = () => {
                     label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                   >
                     {pieData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(v: number) => fmt(v)} />
@@ -213,11 +315,14 @@ const Orcamento = () => {
 
           {/* Collapsible weekly breakdown */}
           {weeks.map((w) => {
-            const wDesp = despMes.filter((d) => { const dt = new Date(d.data_despesa); return dt >= w.inicio && dt <= w.fim; });
-            const wRec = recMes.filter((r) => { const dt = new Date(r.data_receita); return dt >= w.inicio && dt <= w.fim; });
+            const wDesp = despMes.filter((d) => { const dt = parseDateLocal(d.data_despesa); return dt >= w.inicio && dt <= w.fim; });
+            const wRec = recMes.filter((r) => { const dt = parseDateLocal(r.data_receita); return dt >= w.inicio && dt <= w.fim; });
             const wTotalD = wDesp.reduce((a, d) => a + d.valor, 0);
             const wTotalR = wRec.reduce((a, r) => a + r.valor, 0);
-            if (wTotalD === 0 && wTotalR === 0) return null;
+            
+            // Show week if there is ANY transaction (even if sum is 0, though unlikely)
+            if (wDesp.length === 0 && wRec.length === 0) return null;
+            
             const collapsed = collapsedWeeks.has(w.numero);
             return (
               <div key={w.numero} className="card-elevated overflow-hidden">
@@ -245,23 +350,91 @@ const Orcamento = () => {
             );
           })}
 
-          {/* Top 3 clients */}
-          {topClientes.length > 0 && (
-            <div className="card-elevated p-4">
-              <h3 className="font-bold mb-3">🏆 Top Clientes</h3>
-              <div className="space-y-2">
-                {topClientes.map((c, i) => (
-                  <div key={c.nome} className="flex items-center justify-between bg-muted rounded-xl p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
-                      <p className="font-semibold">{c.nome}</p>
-                    </div>
-                    <p className="font-bold text-primary">{fmt(c.total)}</p>
+          {/* Analytics Section - Top Lists */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Top 3 Compradores */}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <User className="h-5 w-5 text-primary" />
+                  <h3 className="font-bold text-lg">Top Compradores</h3>
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground text-xs mb-4">
+                  <Calendar className="h-3 w-3" />
+                  <span className="capitalize">{mesLabel}</span>
+                </div>
+
+                {top3Compradores.length === 0 ? (
+                  <EmptyState
+                    icon={CalendarOff}
+                    title="Nenhuma compra"
+                    description={`Nenhuma compra em ${mesLabel.split(' ')[0]}`}
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {top3Compradores.map((c, i) => (
+                      <div key={i} className="flex justify-between items-center border-b border-border pb-2 last:border-0 last:pb-0">
+                        <div className="flex items-center gap-3">
+                          <span className={`
+                            flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
+                            ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'}
+                          `}>
+                            {i + 1}
+                          </span>
+                          <div>
+                            <p className="font-medium text-sm">{c.nome}</p>
+                            <p className="text-xs text-muted-foreground">{c.qtd} compra(s)</p>
+                          </div>
+                        </div>
+                        <p className="font-bold text-primary">{fmt(c.total)}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top 3 Produtos */}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp className="h-5 w-5 text-primary" />
+                  <h3 className="font-bold text-lg">Mais Reservados</h3>
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground text-xs mb-4">
+                  <Calendar className="h-3 w-3" />
+                  <span className="capitalize">{mesLabel}</span>
+                </div>
+
+                {top3Produtos.length === 0 ? (
+                   <EmptyState
+                      icon={ShoppingBag}
+                      title="Nenhuma reserva"
+                      description={`Nenhuma reserva em ${mesLabel.split(' ')[0]}`}
+                    />
+                ) : (
+                  <div className="space-y-3">
+                    {top3Produtos.map((p, i) => (
+                      <div key={i} className="flex justify-between items-center border-b border-border pb-2 last:border-0 last:pb-0">
+                        <div className="flex items-center gap-3">
+                          <span className={`
+                            flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
+                            ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'}
+                          `}>
+                            {i + 1}
+                          </span>
+                          <p className="font-medium text-sm">{p.nome}</p>
+                        </div>
+                        <span className="bg-primary/10 text-primary px-2 py-1 rounded text-xs font-bold">
+                          {p.quantidade} un
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 
@@ -280,20 +453,26 @@ const Orcamento = () => {
                   <option key={c.nome} value={c.nome}>{c.emoji} {c.nome}</option>
                 ))}
               </select>
-              <input className="input-lg" placeholder="Valor (R$) *" value={rValor} onChange={(e) => setRValor(e.target.value)} required inputMode="decimal" />
+              <input className="input-lg" placeholder="Valor (R$) *" value={rValor} onChange={(e) => setRValor(formatCurrency(e.target.value))} required inputMode="decimal" />
               <input className="input-lg" type="date" value={rData} onChange={(e) => setRData(e.target.value)} required />
               <div className="flex gap-3">
-                <button type="button" onClick={() => setShowRecForm(false)} className="btn-secondary flex-1">Cancelar</button>
-                <button type="submit" className="btn-success flex-1">Salvar</button>
+                <button type="button" onClick={() => setShowRecForm(false)} className="btn-secondary flex-1" disabled={isSubmittingRec}>Cancelar</button>
+                <button type="submit" className="btn-success flex-1" disabled={isSubmittingRec}>
+                  {isSubmittingRec ? <span className="animate-spin mr-2">⏳</span> : null}
+                  {isSubmittingRec ? 'Salvando...' : 'Salvar'}
+                </button>
               </div>
             </form>
           )}
 
           {recMes.length === 0 ? (
-            <div className="card-elevated p-8 text-center">
-              <p className="text-4xl mb-3">💰</p>
-              <p className="text-muted-foreground">Nenhuma receita neste mês</p>
-            </div>
+            <EmptyState
+              icon={Wallet}
+              title="Nenhuma receita"
+              description="Nenhuma receita registrada neste mês."
+              actionLabel="Adicionar Receita"
+              onAction={() => setShowRecForm(true)}
+            />
           ) : (
             <div className="space-y-2">
               {recMes.map((r) => (
@@ -337,78 +516,84 @@ const Orcamento = () => {
                   <option key={c.nome} value={c.nome}>{c.emoji} {c.nome}</option>
                 ))}
               </select>
-              <input className="input-lg" placeholder="Valor (R$) *" value={dValor} onChange={(e) => setDValor(e.target.value)} required inputMode="decimal" />
+              <input className="input-lg" placeholder="Valor (R$) *" value={dValor} onChange={(e) => setDValor(formatCurrency(e.target.value))} required inputMode="decimal" />
               <input className="input-lg" type="date" value={dData} onChange={(e) => setDData(e.target.value)} required />
               <select className="input-lg" value={dStatus} onChange={(e) => setDStatus(e.target.value as 'pendente' | 'paga')}>
                 <option value="pendente">⏳ Pendente</option>
                 <option value="paga">✅ Paga</option>
               </select>
               <div className="flex gap-3">
-                <button type="button" onClick={() => setShowDespForm(false)} className="btn-secondary flex-1">Cancelar</button>
-                <button type="submit" className="btn-primary flex-1">Salvar</button>
+                <button type="button" onClick={() => setShowDespForm(false)} className="btn-secondary flex-1" disabled={isSubmittingDesp}>Cancelar</button>
+                <button type="submit" className="btn-primary flex-1" disabled={isSubmittingDesp}>
+                  {isSubmittingDesp ? <span className="animate-spin mr-2">⏳</span> : null}
+                  {isSubmittingDesp ? 'Salvando...' : 'Salvar'}
+                </button>
               </div>
             </form>
           )}
 
           {despMes.length === 0 ? (
-            <div className="card-elevated p-8 text-center">
-              <p className="text-4xl mb-3">💸</p>
-              <p className="text-muted-foreground">Nenhuma despesa neste mês</p>
-            </div>
+            <EmptyState
+              icon={CreditCard}
+              title="Nenhuma despesa"
+              description="Nenhuma despesa registrada neste mês."
+              actionLabel="Adicionar Despesa"
+              onAction={() => setShowDespForm(true)}
+            />
           ) : (
-            <div className="space-y-4">
-              {weeks.map((w) => {
-                const wDesp = despMes.filter((d) => { const dt = new Date(d.data_despesa); return dt >= w.inicio && dt <= w.fim; });
-                if (wDesp.length === 0) return null;
-                const sub = wDesp.reduce((a, d) => a + d.valor, 0);
-                const collapsed = collapsedWeeks.has(w.numero + 100); // offset to avoid conflict
-                return (
-                  <div key={w.numero}>
-                    <button
-                      onClick={() => {
-                        setCollapsedWeeks((prev) => {
-                          const next = new Set(prev);
-                          const key = w.numero + 100;
-                          next.has(key) ? next.delete(key) : next.add(key);
-                          return next;
-                        });
-                      }}
-                      className="w-full flex items-center justify-between mb-2"
-                    >
-                      <h3 className="font-bold text-sm text-muted-foreground">{w.label}</h3>
-                      <span className="text-sm text-muted-foreground">{collapsed ? '▸' : '▾'} {fmt(sub)}</span>
-                    </button>
-                    {!collapsed && (
-                      <div className="space-y-2">
-                        {wDesp.map((d) => (
-                          <div key={d.id} className="card-elevated p-3 flex items-center justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span>{getEmojiCat(d.categoria)}</span>
-                                <p className="font-semibold">{d.descricao}</p>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <span>📅 {d.data_despesa}</span>
-                                <span>📁 {d.categoria}</span>
-                                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                                  d.status === 'pendente' ? 'bg-warning/20 text-warning' : 'bg-success/20 text-success'
-                                }`}>
-                                  {d.status === 'pendente' ? '⏳ Pendente' : '✅ Paga'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="text-right ml-3">
-                              <p className="font-bold text-destructive">{fmt(d.valor)}</p>
-                              <button onClick={() => deleteDespesa(d.id)} className="text-destructive text-sm mt-1">🗑️</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+             <div className="space-y-4">
+               {weeks.map((w) => {
+                 const wDesp = despMes.filter((d) => { const dt = new Date(d.data_despesa); return dt >= w.inicio && dt <= w.fim; });
+                 if (wDesp.length === 0) return null;
+                 const sub = wDesp.reduce((a, d) => a + d.valor, 0);
+                 const collapsed = collapsedWeeks.has(w.numero + 100); // offset to avoid conflict
+                 return (
+                   <div key={w.numero}>
+                     <button
+                       onClick={() => {
+                         setCollapsedWeeks((prev) => {
+                           const next = new Set(prev);
+                           const key = w.numero + 100;
+                           next.has(key) ? next.delete(key) : next.add(key);
+                           return next;
+                         });
+                       }}
+                       className="w-full flex items-center justify-between mb-2"
+                     >
+                       <h3 className="font-bold text-sm text-muted-foreground">{w.label}</h3>
+                       <span className="text-sm text-muted-foreground">{collapsed ? '▸' : '▾'} {fmt(sub)}</span>
+                     </button>
+                     {!collapsed && (
+                       <div className="space-y-2">
+                         {wDesp.map((d) => (
+                           <div key={d.id} className="card-elevated p-3 flex items-center justify-between">
+                             <div className="flex-1">
+                               <div className="flex items-center gap-2 mb-1">
+                                 <span>{getEmojiCat(d.categoria)}</span>
+                                 <p className="font-semibold">{d.descricao}</p>
+                               </div>
+                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                 <span>📅 {d.data_despesa}</span>
+                                 <span>📁 {d.categoria}</span>
+                                 <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                                   d.status === 'pendente' ? 'bg-warning/20 text-warning' : 'bg-success/20 text-success'
+                                 }`}>
+                                   {d.status === 'pendente' ? '⏳ Pendente' : '✅ Paga'}
+                                 </span>
+                               </div>
+                             </div>
+                             <div className="text-right ml-3">
+                               <p className="font-bold text-destructive">{fmt(d.valor)}</p>
+                               <button onClick={() => deleteDespesa(d.id)} className="text-destructive text-sm mt-1">🗑️</button>
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+                 );
+               })}
+             </div>
           )}
         </div>
       )}

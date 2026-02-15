@@ -14,25 +14,42 @@ export interface Produto {
   created_at: string;
 }
 
+export interface PedidoItem {
+  id: string;
+  produto_id: string;
+  produto_nome: string; // Denormalized for easier display/history
+  quantidade: number;
+  preco_unitario: number;
+  subtotal: number;
+  paidAt?: string | null;      // NEW: Granular payment status
+  deliveredAt?: string | null; // NEW: Granular delivery status
+}
+
 export interface PedidoPreVenda {
   id: string;
   cliente_id: string;
-  produto_id: string;
-  quantidade: number;
-  valor_unitario: number;
+  // Legacy fields (kept optional for types, but migration will move data to itens)
+  produto_id?: string;
+  quantidade?: number;
+  valor_unitario?: number;
+  
+  itens: PedidoItem[];
   valor_total: number;
   status: 'pendente' | 'entregue' | 'pago';
   data_pedido: string;
   data_entrega?: string;
   data_pagamento?: string;
   forma_pagamento?: string;
+  observacoes?: string;
 }
 
 export interface RegistroPosVenda {
   id: string;
   cliente_id: string;
-  descricao: string;
-  quantidade: number;
+  descricao: string; // Keep for general description or legacy
+  
+  itens: PedidoItem[];
+  quantidade: number; // Total quantity (sum of items) or legacy
   valor_total: number;
   status: 'aberto' | 'pago';
   data_registro: string;
@@ -102,10 +119,12 @@ export interface DevedorAgrupado {
   itens: Array<{
     tipo: 'prevenda' | 'posvenda';
     id: string;
+    itemId?: string; // New: for granular actions
     descricao: string;
     valor: number;
     dias: number;
     data: string;
+    paidAt?: string | null; // New: to show status in UI
   }>;
   total: number;
 }
