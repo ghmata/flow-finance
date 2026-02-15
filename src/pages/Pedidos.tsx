@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useStore } from '@/store/useStore';
 import { useLocation } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -91,6 +91,7 @@ const Pedidos = () => {
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
   const [isSubmittingPv, setIsSubmittingPv] = useState(false);
+  const novaReservaTitleRef = useRef<HTMLHeadingElement>(null);
 
   const handleAddItem = () => {
     setPvItens([...pvItens, { id: `new-${Date.now()}`, produto_id: '', produto_nome: '', quantidade: 1, preco_unitario: 0, subtotal: 0 }]);
@@ -255,7 +256,7 @@ const Pedidos = () => {
           {(() => {
                         
             const FormContent = (
-              <form onSubmit={handlePreVenda} className="space-y-4 px-4 sm:px-0">
+              <form onSubmit={handlePreVenda} className="space-y-4">
                 {clientes.length === 0 ? (
                   <p className="text-muted-foreground text-center py-4">⚠️ Cadastre clientes primeiro</p>
                 ) : (
@@ -291,7 +292,7 @@ const Pedidos = () => {
                       <p className="text-3xl font-bold text-primary">{fmt(valorTotalPV)}</p>
                     </div>
 
-                    <div className="flex gap-3 pt-2">
+                    <div className="flex flex-col gap-3 pt-2 sm:flex-row">
                       <button type="button" onClick={() => setShowPvForm(false)} className="btn-secondary flex-1 h-auto min-h-12 py-3" disabled={isSubmittingPv}>Cancelar</button>
                       <button type="submit" className="btn-primary flex-1 h-auto min-h-12 py-3 whitespace-normal leading-tight" disabled={isSubmittingPv}>
                         {isSubmittingPv ? <span className="animate-spin mr-2">⏳</span> : null}
@@ -306,9 +307,15 @@ const Pedidos = () => {
             // Mobile-friendly Dialog (prevents nested drawer issues)
             return (
               <Dialog open={showPvForm} onOpenChange={setShowPvForm}>
-                <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto p-6">
+                <DialogContent
+                  className="w-[calc(100vw-24px)] max-w-[calc(100vw-24px)] rounded-2xl overflow-x-hidden overflow-y-auto max-h-[85vh] p-4 sm:max-w-lg sm:rounded-2xl sm:p-6"
+                  onOpenAutoFocus={(event) => {
+                    event.preventDefault();
+                    novaReservaTitleRef.current?.focus();
+                  }}
+                >
                   <DialogHeader>
-                    <DialogTitle>📦 Nova Reserva</DialogTitle>
+                    <DialogTitle ref={novaReservaTitleRef} tabIndex={-1}>📦 Nova Reserva</DialogTitle>
                     <DialogDescription>
                       Preencha os dados abaixo para criar uma nova reserva.
                     </DialogDescription>
