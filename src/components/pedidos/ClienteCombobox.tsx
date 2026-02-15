@@ -117,7 +117,6 @@ export const ClienteCombobox = ({ value, onChange }: ClienteComboboxProps) => {
                         onChange('');
                     }
                 }}
-                onFocus={() => setOpen(true)}
                 onClick={() => setOpen(true)}
              />
              <ChevronsUpDown className="absolute right-3 top-3 h-4 w-4 shrink-0 opacity-50 pointer-events-none" />
