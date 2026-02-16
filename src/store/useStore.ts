@@ -50,6 +50,7 @@ interface AppState {
 
   // Pré-venda
   addPreVenda: (cliente_id: string, itens: PedidoItem[]) => Promise<boolean>;
+  updatePreVenda: (id: string, data: Partial<PedidoPreVenda>) => Promise<boolean>;
   entregarPreVenda: (id: string) => Promise<boolean>;
   entregarItem: (pedido_id: string, item_id: string) => Promise<boolean>; // Granular delivery
   deletePreVenda: (id: string) => Promise<boolean>;
@@ -61,7 +62,7 @@ interface AppState {
   // Pagamento
   // Pagamento Granular
   registrarPagamentoReserva: (tipo: 'prevenda' | 'posvenda', referencia_id: string, item_id: string, forma_pagamento: string) => Promise<void>;
-  registrarPagamentoEmLote: (tipo: 'prevenda' | 'posvenda', referencia_id: string, itens_ids: string[], forma_pagamento: string) => Promise<void>;
+  registrarPagamentoEmLote: (tipo: 'prevenda' | 'posvenda', referencia_id: string, itens_ids: string[], forma_pagamento: string, valor_pago_custom?: number) => Promise<void>;
   // Legacy support or full order payment
   registrarPagamento: (tipo: 'prevenda' | 'posvenda', referencia_id: string, forma_pagamento: string) => Promise<void>;
 
@@ -289,6 +290,35 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  updatePreVenda: async (id, data) => {
+    console.log('[updatePreVenda] Iniciando...', { id, data });
+    try {
+      // Calculate new total if items are updated
+      const updateData = { ...data };
+      if (data.itens) {
+          const valor_total = data.itens.reduce((acc, item) => acc + item.subtotal, 0);
+          updateData.valor_total = valor_total;
+      }
+
+      const res = await dbUpdate('pedidosPreVenda', id, updateData);
+      if (res.success) {
+        set((s) => ({
+          pedidosPreVenda: s.pedidosPreVenda.map((p) =>
+            p.id === id ? { ...p, ...updateData } : p
+          ),
+        }));
+        return true;
+      } else {
+        console.error('[updatePreVenda] Falha:', res.error);
+        set({ error: 'Erro ao atualizar pedido.' });
+        return false;
+      }
+    } catch (e) {
+      console.error('[updatePreVenda] Exceção:', e);
+      return false;
+    }
+  },
+
   deletePreVenda: async (id) => {
     console.log('[deletePreVenda] Iniciando...', { id });
     try {
@@ -457,7 +487,7 @@ export const useStore = create<AppState>((set, get) => ({
       await get().registrarPagamentoEmLote(tipo, referencia_id, [item_id], forma_pagamento);
   },
 
-  registrarPagamentoEmLote: async (tipo, referencia_id, itens_ids, forma_pagamento) => {
+  registrarPagamentoEmLote: async (tipo, referencia_id, itens_ids, forma_pagamento, valor_pago_custom) => {
     const state = get();
     let cliente_id = '';
     let cliente_nome = '';
@@ -480,21 +510,34 @@ export const useStore = create<AppState>((set, get) => ({
     }
     
     // Filter items regarding ids
-    // Check which ones are NOT paid yet to avoid double charging revenue?
-    // Or just pay them. Let's assume UI filters. But for revenue safely, only sum unpaying ones.
-    const itemsToPay = currentItens.filter(i => itens_ids.includes(i.id) && !i.paidAt);
+    // Fix: Handle 'balance-' synthetic IDs from getDevedores
+    const hasBalanceItem = itens_ids.some(id => id.startsWith('balance-'));
+    
+    let itemsToPay = currentItens.filter(i => itens_ids.includes(i.id) && !i.paidAt);
+    
+    // If we are paying a balance item, or if we are paying a partial order (where items are not paid yet)
+    // We should consider all unpaid items for calculation context
+    if (itemsToPay.length === 0 && hasBalanceItem) {
+        itemsToPay = currentItens.filter(i => !i.paidAt);
+    }
+
     if (itemsToPay.length === 0) {
         console.warn('No items to pay or already paid.');
         return;
     }
 
-    valor_pagamento_total = itemsToPay.reduce((acc, i) => acc + i.subtotal, 0);
+    // Use custom value if provided, otherwise sum items
+    valor_pagamento_total = valor_pago_custom !== undefined ? valor_pago_custom : itemsToPay.reduce((acc, i) => acc + i.subtotal, 0);
+    
     cliente_nome = state.clientes.find((c) => c.id === cliente_id)?.nome || 'Cliente';
     const data_pagamento = today();
 
     // Prepare new items state
     const newItens = currentItens.map(i => {
-        if (itens_ids.includes(i.id) && !i.paidAt) {
+        // Check if item is in the list OR if we are paying via balance synthetic item
+        const isSelected = itens_ids.includes(i.id) || hasBalanceItem;
+        
+        if (isSelected && !i.paidAt) {
             return { ...i, paidAt: data_pagamento };
         }
         return i;
@@ -502,33 +545,65 @@ export const useStore = create<AppState>((set, get) => ({
     
     // Check parent status
     const allPaid = newItens.every(i => !!i.paidAt);
-    const allDelivered = newItens.every(i => !!i.deliveredAt); // assuming deliveredAt exists or treated elsewhere
+    const allDelivered = newItens.every(i => !!i.deliveredAt); 
     
-    // Update parent status based on new state
-    // logic: if all paid -> 'pago'. If all paid + delivered -> 'pago' (implicitly delivered)
-    // Actually, simple logic:
-    let novoStatus = 'pendente';
-    if (allPaid) novoStatus = 'pago'; 
-    // Note: If deliveries happen, status might be 'entregue' if not all paid. 
-    // If all paid, status becomes 'pago' (which usually implies transaction closed, but delivery might be pending).
-    // Let's keep specific logic: 'pago' overrides 'entregue' or 'pendente'? 
-    // Usually: 'pago' means fully paid. 'entregue' means delivered.
-    // If allPaid, set 'pago'. 
+    // Calculate new total paid
+    const currentPaid = (tipo === 'prevenda' 
+        ? state.pedidosPreVenda.find(p => p.id === referencia_id)?.valor_pago 
+        : state.registrosPosVenda.find(r => r.id === referencia_id)?.valor_pago) || 0;
+
+    let novo_valor_pago = currentPaid + valor_pagamento_total;
     
-    updateData = { itens: newItens, ...(allPaid ? { status: 'pago', data_pagamento, forma_pagamento } : {}) };
+    // Determine new status
+    let novoStatus: any = 'pendente'; // default
+    if (tipo === 'posvenda') novoStatus = 'aberto';
+
+    const parentTotal = (tipo === 'prevenda' 
+        ? state.pedidosPreVenda.find(p => p.id === referencia_id)?.valor_total 
+        : state.registrosPosVenda.find(r => r.id === referencia_id)?.valor_total) || 0;
+
+    if (novo_valor_pago >= parentTotal - 0.01) { // tolerance
+        novoStatus = 'pago';
+        novo_valor_pago = parentTotal; // Cap at total
+    } else if (novo_valor_pago > 0) {
+        novoStatus = 'parcial';
+    }
+
+    // IF PARTIAL: Do NOT mark items as paidAt individually if we are just paying a lump sum that doesn't cover specific items?
+    // OR: If we paid specific items, we mark them.
+    // The previous logic marked items as paid if they were in the list.
+    // Issue: If I select "Receber Tudo" (all items), but change value to 50%...
+    // Then I am paying 50% of ALL items? Or paying some items?
+    // User wants "Saldo Devedor".
+    // Strategy: If partial payment, WE DO NOT MARK ITEMS AS PAID.
+    // We only track the global 'valor_pago'.
+    // Items remain 'open' until the full order is paid.
+    
+    let finalItens = newItens;
+    if (novoStatus === 'parcial') {
+        // Revert paidAt for items if it was set by this transaction
+        // Actually, 'newItens' were just mapped above to set paidAt.
+        // We should NOT set paidAt if it's partial.
+        finalItens = currentItens; // Keep original items (unpaid)
+    }
+
+    updateData = { 
+        itens: finalItens, 
+        valor_pago: novo_valor_pago,
+        status: novoStatus,
+        ...(novoStatus === 'pago' ? { data_pagamento, forma_pagamento } : {}) 
+    };
 
     // DB Ops
     const pagamento_id = uid();
     const novoPagamento: Pagamento = {
         id: pagamento_id, type: tipo, referencia_id, cliente_id, valor_pago: valor_pagamento_total, forma_pagamento, data_pagamento
-    } as any; // Cast because 'type' vs 'tipo' in interface? Interface says 'tipo'. Let's check interface. Interface says 'tipo'.
-
-    // Wait, interface Pagamento uses 'tipo', but code above used 'type' in my thought? No, strict.
-    novoPagamento.tipo = tipo; // Correction
+    } as any; 
+    novoPagamento.tipo = tipo;
 
     const novaReceita: Receita = {
         id: uid(),
-        descricao: `Venda Parcial - ${cliente_nome}`,
+        descricao: `Venda ${novoStatus === 'parcial' ? 'Parcial' : ''} - ${cliente_nome}`,
         categoria: 'Venda de produtos',
         valor: valor_pagamento_total,
         data_receita: data_pagamento,
@@ -609,7 +684,7 @@ export const useStore = create<AppState>((set, get) => ({
     const map = new Map<string, DevedorAgrupado>();
 
     state.pedidosPreVenda
-      .filter((p) => p.status === 'pendente' || p.status === 'entregue')
+      .filter((p) => p.status === 'pendente' || p.status === 'entregue' || p.status === 'parcial')
       .forEach((p) => {
         const cliente = state.clientes.find((c) => c.id === p.cliente_id);
         if (!cliente) return;
@@ -626,32 +701,64 @@ export const useStore = create<AppState>((set, get) => ({
              // Only if not paid
              if (p.status === 'pago') return; 
              
+             // Calculate remaining value for legacy or grouped items
+             const valorRestante = p.valor_total - (p.valor_pago || 0);
+             if (valorRestante <= 0.01) return; // Should be paid
+
+             // Create a single item representing the whole order or remaining balance
              const produto = state.produtos.find((pr) => pr.id === p.produto_id);
              entry.itens.push({
                 tipo: 'prevenda', id: p.id, itemId: p.id,
-                descricao: produto?.nome_sabor || 'Produto',
-                valor: p.valor_total,
+                descricao: (produto?.nome_sabor || 'Produto') + (p.status === 'parcial' ? ' (Restante)' : ''),
+                valor: valorRestante,
                 dias: daysBetween(p.data_entrega || p.data_pedido),
                 data: p.data_entrega || p.data_pedido,
                 paidAt: null
              });
         } else {
-            itens.forEach(item => {
-                if (item.paidAt) return; // Skip paid
-                entry.itens.push({
-                  tipo: 'prevenda', id: p.id, itemId: item.id,
-                  descricao: item.produto_nome,
-                  valor: item.subtotal,
-                  dias: daysBetween(p.data_entrega || p.data_pedido),
-                  data: p.data_entrega || p.data_pedido,
-                  paidAt: item.paidAt,
+             // Granular Items Logic with Partial Support
+             // If status is 'parcial', we might have unallocated payments.
+             // Strategy: Show items as usual. But if 'parcial', maybe show a "Discount" item?
+             // Or better: If 'parcial', we don't know WHICH item is paid.
+             // So we should probably aggregate them if it's partial?
+             // OR: Just list all unpaid items, but adjusting the TOTAL displayed in the card?
+             // The 'total' property of DevedorAgrupado is calculated from items.
+             
+             // If I have 3 items of 50 (Total 150). I paid 50. Status Partial. Balance 100.
+             // If I list 3 items of 50, Total is 150. Wrong.
+             // If I list them, the user selects "Receber Tudo", defaults to 100.
+             
+             // Solution: If status is 'parcial', ignore individual items and show a single "Saldo Devedor" item?
+             // This simplifies "Receber Tudo" logic for the next payment.
+             
+             if (p.status === 'parcial') {
+                 const valorRestante = p.valor_total - (p.valor_pago || 0);
+                  entry.itens.push({
+                      tipo: 'prevenda', id: p.id, itemId: 'balance-' + p.id,
+                      descricao: `Saldo Restante (Req. ${p.id.substr(0,4)})`,
+                      valor: valorRestante,
+                      dias: daysBetween(p.data_entrega || p.data_pedido),
+                      data: p.data_entrega || p.data_pedido,
+                      paidAt: null
+                  });
+             } else {
+                itens.forEach(item => {
+                    if (item.paidAt) return; // Skip paid
+                    entry.itens.push({
+                      tipo: 'prevenda', id: p.id, itemId: item.id,
+                      descricao: item.produto_nome,
+                      valor: item.subtotal,
+                      dias: daysBetween(p.data_entrega || p.data_pedido),
+                      data: p.data_entrega || p.data_pedido,
+                      paidAt: item.paidAt,
+                    });
                 });
-            });
+             }
         }
       });
 
     state.registrosPosVenda
-      .filter((r) => r.status === 'aberto')
+      .filter((r) => r.status === 'aberto' || r.status === 'parcial')
       .forEach((r) => {
         const cliente = state.clientes.find((c) => c.id === r.cliente_id);
         if (!cliente) return;
@@ -677,20 +784,30 @@ export const useStore = create<AppState>((set, get) => ({
               paidAt: r.data_pagamento, // likely null
             });
         } else {
-             itens.forEach(item => {
-                if (item.paidAt) return; // Skip paid items in "Devedores" view? Or show them? 
-                // Usually "Devedores" means "Unpaid".
-                // So filter out paid items.
-                
-                entry.itens.push({
-                  tipo: 'posvenda', id: r.id, itemId: item.id,
-                  descricao: item.produto_nome,
-                  valor: item.subtotal,
-                  dias: daysBetween(r.data_registro),
-                  data: r.data_registro,
-                  paidAt: item.paidAt,
-                });
-             });
+             if (r.status === 'parcial') {
+                 const valorRestante = r.valor_total - (r.valor_pago || 0);
+                  entry.itens.push({
+                      tipo: 'posvenda', id: r.id, itemId: 'balance-' + r.id,
+                      descricao: `Saldo Restante (Venda ${r.id.substr(0,4)})`,
+                      valor: valorRestante,
+                      dias: daysBetween(r.data_registro),
+                      data: r.data_registro,
+                      paidAt: null
+                  });
+             } else {
+                 itens.forEach(item => {
+                    if (item.paidAt) return; 
+                    
+                    entry.itens.push({
+                      tipo: 'posvenda', id: r.id, itemId: item.id,
+                      descricao: item.produto_nome,
+                      valor: item.subtotal,
+                      dias: daysBetween(r.data_registro),
+                      data: r.data_registro,
+                      paidAt: item.paidAt,
+                    });
+                 });
+             }
         }
         
         // Recalc total based on unpaid items
@@ -714,24 +831,49 @@ export const useStore = create<AppState>((set, get) => ({
   getTop3Compradores: () => {
     const state = get();
     
-    // Filter orders by current month using date-utils
-    const pedidosDoMes = [
-      ...state.pedidosPreVenda.filter(p => isInCurrentMonth(p.data_pedido)),
-      ...state.registrosPosVenda.filter(p => isInCurrentMonth(p.data_registro))
-    ];
-    
+    // Logic: Sum valor_pago from orders/records in current month
     const map = new Map<string, { nome: string; total: number; qtd: number }>();
     
-    pedidosDoMes.forEach(p => {
-       const cliente = state.clientes.find(c => c.id === p.cliente_id);
-       if (!cliente) return;
-       
-       if (!map.has(p.cliente_id)) {
-         map.set(p.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
-       }
-       const entry = map.get(p.cliente_id)!;
-       entry.total += p.valor_total;
-       entry.qtd += 1;
+    // 1. Process Pedidos Pre-Venda
+    state.pedidosPreVenda.forEach(p => {
+        // Must have some payment and be in current month
+        const valorPago = p.valor_pago || 0;
+        if (valorPago <= 0) return;
+        
+        // Use data_pagamento if available, else fallback to data_pedido (legacy)
+        const dateToCheck = p.data_pagamento || p.data_pedido;
+        if (!isInCurrentMonth(dateToCheck)) return;
+        
+        if (!map.has(p.cliente_id)) {
+             const cliente = state.clientes.find(c => c.id === p.cliente_id);
+             if (!cliente) return;
+             map.set(p.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
+        }
+        const entry = map.get(p.cliente_id)!;
+        entry.total += valorPago;
+        entry.qtd += 1;
+    });
+
+    // 2. Process Registros Pos-Venda
+    state.registrosPosVenda.forEach(r => {
+        // PosVenda usually paid on spot, so valor_pago should be total if 'pago', or partial
+        // Fallback: if status is 'pago' and valor_pago undefined, use valor_total (legacy)
+        let valorPago = r.valor_pago || 0;
+        if (r.status === 'pago' && valorPago === 0) valorPago = r.valor_total;
+        
+        if (valorPago <= 0) return;
+
+        const dateToCheck = r.data_pagamento || r.data_registro;
+        if (!isInCurrentMonth(dateToCheck)) return;
+
+        if (!map.has(r.cliente_id)) {
+             const cliente = state.clientes.find(c => c.id === r.cliente_id);
+             if (!cliente) return;
+             map.set(r.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
+        }
+        const entry = map.get(r.cliente_id)!;
+        entry.total += valorPago;
+        entry.qtd += 1;
     });
     
     return Array.from(map.values())

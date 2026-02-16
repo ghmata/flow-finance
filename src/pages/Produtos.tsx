@@ -15,10 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatCurrency, parseCurrency } from '@/utils/masks';
-import { Package, Plus } from 'lucide-react';
+
+import { Package, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const Produtos = () => {
-  const { produtos, addProduto, deleteProduto } = useStore();
+  const { produtos, addProduto, updateProduto, deleteProduto } = useStore();
   const { toast } = useToast();
 
   const [showProdForm, setShowProdForm] = useState(false);
@@ -26,6 +28,7 @@ const Produtos = () => {
   const [prodPreco, setProdPreco] = useState('');
   const [busca, setBusca] = useState('');
   const [deleteState, setDeleteState] = useState<{ id: string; nome: string } | null>(null);
+  const [editPId, setEditPId] = useState<string | null>(null);
 
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
@@ -42,15 +45,23 @@ const Produtos = () => {
     if (!prodNome.trim() || isNaN(preco) || preco <= 0) return;
     
     setIsSubmitting(true);
+    setIsSubmitting(true);
     try {
-      const success = await addProduto(prodNome.trim(), preco);
+      let success = false;
+      if (editPId) {
+          success = await updateProduto(editPId, { nome_sabor: prodNome.trim(), preco_unitario: preco });
+      } else {
+          success = await addProduto(prodNome.trim(), preco);
+      }
+
       if (success) {
-        toast({ title: "Produto cadastrado!", className: "bg-success text-white border-none" });
+        toast({ title: editPId ? "Produto atualizado!" : "Produto cadastrado!", className: "bg-success text-white border-none" });
         setProdNome('');
         setProdPreco('');
         setShowProdForm(false);
+        setEditPId(null);
       } else {
-        toast({ title: "Erro ao cadastrar produto", variant: "destructive" });
+        toast({ title: "Erro ao salvar produto", variant: "destructive" });
       }
     } catch (error: any) {
       console.error('[Produtos] Erro fatal:', error);
@@ -58,6 +69,20 @@ const Produtos = () => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleEditProduto = (p: any) => {
+      setProdNome(p.nome_sabor);
+      setProdPreco(p.preco_unitario.toFixed(2).replace('.', ','));
+      setEditPId(p.id);
+      setShowProdForm(true);
+  };
+
+  const handleCloseForm = () => {
+      setShowProdForm(false);
+      setProdNome('');
+      setProdPreco('');
+      setEditPId(null);
   };
 
   const handleConfirmDelete = async () => {
@@ -76,7 +101,7 @@ const Produtos = () => {
     <div className="page-container">
       <div className="flex items-center justify-between mb-4">
         <h1 className="page-title mb-0">🍰 Produtos</h1>
-        <button onClick={() => setShowProdForm(!showProdForm)} className="btn-primary text-base py-3 px-5">
+        <button onClick={() => { handleCloseForm(); setShowProdForm(!showProdForm); }} className="btn-primary text-base py-3 px-5">
           <Plus className="mr-2 h-5 w-5" />
           Novo
         </button>
@@ -121,10 +146,10 @@ const Produtos = () => {
             />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => setShowProdForm(false)} className="btn-secondary flex-1" disabled={isSubmitting}>Cancelar</button>
+            <button type="button" onClick={handleCloseForm} className="btn-secondary flex-1" disabled={isSubmitting}>Cancelar</button>
             <button type="submit" className="btn-primary flex-1" disabled={isSubmitting}>
               {isSubmitting ? <span className="animate-spin mr-2">⏳</span> : null}
-              {isSubmitting ? 'Salvando...' : 'Salvar'}
+              {isSubmitting ? 'Salvando...' : (editPId ? 'Salvar Alterações' : 'Salvar')}
             </button>
           </div>
         </form>
@@ -136,7 +161,7 @@ const Produtos = () => {
           title={busca ? "Nenhum resultado encontrado" : "Nenhum produto cadastrado"}
           description={busca ? "Tente buscar por outro nome." : "Adicione seus produtos para facilitar as vendas."}
           actionLabel={!busca ? "Adicionar Produto" : undefined}
-          onAction={!busca ? () => setShowProdForm(true) : undefined}
+          onAction={!busca ? () => { handleCloseForm(); setShowProdForm(true); } : undefined}
         />
       ) : (
         <div className="space-y-2">
@@ -148,13 +173,24 @@ const Produtos = () => {
                 <p className="font-bold text-lg">{p.nome_sabor}</p>
                 <p className="text-success font-semibold">{fmt(p.preco_unitario)}</p>
               </div>
-              <button 
-                onClick={() => setDeleteState({ id: p.id, nome: p.nome_sabor })} 
-                className="text-destructive text-xl p-2 hover:bg-destructive/10 rounded-lg transition-colors"
-                aria-label={`Excluir produto ${p.nome_sabor}`}
-              >
-                <span aria-hidden="true">🗑️</span>
-              </button>
+              <div className="flex items-center gap-2">
+                 <Button 
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleEditProduto(p)}
+                    className="text-primary hover:text-primary hover:bg-primary/10 h-8 px-2"
+                 >
+                    <Pencil className="h-4 w-4" />
+                 </Button>
+                 <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => setDeleteState({ id: p.id, nome: p.nome_sabor })} 
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2"
+                 >
+                    <Trash2 className="h-4 w-4" />
+                 </Button>
+              </div>
             </div>
           ))}
         </div>

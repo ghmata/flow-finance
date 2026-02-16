@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { useLocation } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -22,7 +22,8 @@ import {
 } from "@/components/ui/dialog";
 
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Search, Eye, EyeOff, ShoppingCart, Plus, Trash2, CheckCircle, Package } from "lucide-react";
+import { Search, Eye, EyeOff, ShoppingCart, Plus, Trash2, CheckCircle, Package, Pencil, Truck } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatCurrency, parseCurrency } from '@/utils/masks';
@@ -35,7 +36,7 @@ type Tab = 'prevenda' | 'posvenda';
 const Pedidos = () => {
   const {
     clientes, produtos, pedidosPreVenda, registrosPosVenda,
-    addPreVenda, addPosVenda, entregarPreVenda,
+    addPreVenda, updatePreVenda, addPosVenda, entregarPreVenda, entregarItem,
     deletePreVenda, deletePosVenda,
     getClienteNome, getProdutoNome,
   } = useStore();
@@ -67,6 +68,25 @@ const Pedidos = () => {
 
   // Pré-venda form
   const [showPvForm, setShowPvForm] = useState(false);
+  const [comboboxOpen, setComboboxOpen] = useState(false);
+  const novaReservaContentRef = useRef<HTMLDivElement>(null);
+  
+  // Blur focus when Dialog closes to prevent aria-hidden errors
+  useEffect(() => {
+      if (!showPvForm) {
+          // Fecha Combobox primeiro
+          setComboboxOpen(false);
+
+          const timer = setTimeout(() => {
+              const activeElement = document.activeElement as HTMLElement;
+              // Check if focus is still inside the dialog content (or what was the dialog content)
+              if (novaReservaContentRef.current?.contains(activeElement)) {
+                  activeElement.blur();
+              }
+          }, 50); // Small delay to allow closing animation to start
+          return () => clearTimeout(timer);
+      }
+  }, [showPvForm]);
   const [pvCliente, setPvCliente] = useState('');
   // New state for items
   const [pvItens, setPvItens] = useState<PedidoItem[]>([
@@ -121,14 +141,19 @@ const Pedidos = () => {
     
     setIsSubmittingPv(true);
     try {
-      const success = await addPreVenda(pvCliente, validItens);
+      let success = false;
+      if (editPvId) {
+          success = await updatePreVenda(editPvId, { cliente_id: pvCliente, itens: validItens });
+      } else {
+          success = await addPreVenda(pvCliente, validItens);
+      }
+
       if (success) {
-        toast({ title: "Reserva criada!", className: "bg-success text-white border-none" });
-        setPvItens([{ id: `init-${Date.now()}`, produto_id: '', produto_nome: '', quantidade: 1, preco_unitario: 0, subtotal: 0 }]);
-        setPvCliente('');
+        toast({ title: editPvId ? "Reserva atualizada!" : "Reserva criada!", className: "bg-success text-white border-none" });
+        resetPvForm();
         setShowPvForm(false);
       } else {
-        toast({ title: "Erro ao criar reserva", variant: "destructive" });
+        toast({ title: "Erro ao salvar reserva", variant: "destructive" });
       }
     } catch (error: unknown) {
       console.error('[Pedidos] Erro fatal (PreVenda):', error);
@@ -137,6 +162,33 @@ const Pedidos = () => {
     } finally {
       setIsSubmittingPv(false);
     }
+  };
+
+  const resetPvForm = () => {
+      setPvItens([{ id: `init-${Date.now()}`, produto_id: '', produto_nome: '', quantidade: 1, preco_unitario: 0, subtotal: 0 }]);
+      setPvCliente('');
+      setEditPvId(null);
+  };
+
+  const handleEditPreVenda = (pedido: any) => {
+      setPvCliente(pedido.cliente_id);
+      // Ensure we have a valid list for editing, copying to avoid mutation issues
+      const itens = pedido.itens && pedido.itens.length > 0 
+          ? pedido.itens.map((i: any) => ({ ...i })) 
+          : [{ id: `legacy-${Date.now()}`, produto_id: pedido.produto_id, produto_nome: getProdutoNome(pedido.produto_id), quantidade: pedido.quantidade || 1, preco_unitario: pedido.valor_unitario || 0, subtotal: pedido.valor_total }];
+      
+      setPvItens(itens);
+      setEditPvId(pedido.id);
+      setShowPvForm(true);
+  };
+
+  const closePvForm = () => {
+      setComboboxOpen(false); // Ensure combobox closes
+      setShowPvForm(false);
+      // resetPvForm() is called when opening or explicitly resetting, 
+      // but let's keep it here if that was the intent, or maybe we want to preserve state?
+      // The original code called resetPvForm().
+      resetPvForm();
   };
 
   const [isSubmittingPos, setIsSubmittingPos] = useState(false);
@@ -208,143 +260,175 @@ const Pedidos = () => {
   ];
 
   return (
-    <div className="page-container">
-      <h1 className="page-title">🛒 Vendas</h1>
+    <div className="page-container pb-24 md:pb-6">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Vendas</h1>
+        {/* Search Input - Compact */}
+         <div className="relative w-40 sm:w-60">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              className="w-full bg-secondary/50 border-none rounded-full pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              placeholder="Buscar..."
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+         </div>
+      </div>
 
-      <div className="flex gap-2 mb-4">
-        <input
-          className="input-lg flex-1"
-          placeholder="🔍 Buscar por cliente..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-        />
+      {/* TABS - Segmented Control Style */}
+      <div className="flex p-1 mb-6 bg-secondary/50 rounded-2xl">
         <button
-          onClick={() => setShowConcluidos(!showConcluidos)}
-          className={`px-3 rounded-lg border text-2xl transition-colors ${
-            showConcluidos ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-input text-muted-foreground'
+          onClick={() => setTab('prevenda')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+            tab === 'prevenda' 
+              ? 'bg-white text-primary shadow-sm' 
+              : 'text-muted-foreground hover:text-foreground'
           }`}
-          title={showConcluidos ? "Ocultar finalizados" : "Mostrar finalizados"}
         >
-          {showConcluidos ? <Eye className="h-6 w-6" /> : <EyeOff className="h-6 w-6" />}
+          <span className="text-lg">📌</span> Reservados
+        </button>
+        <button
+          onClick={() => setTab('posvenda')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+            tab === 'posvenda' 
+              ? 'bg-white text-primary shadow-sm' 
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <ShoppingCart className="h-4 w-4" /> Pronta Entrega
         </button>
       </div>
 
-      <div className="flex gap-1 mb-5 bg-muted rounded-xl p-1">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-              tab === t.key ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
 
-
-      {/* RESERVADOS */}
+      {/* CONTEÚDO - RESERVADOS */}
       {tab === 'prevenda' && (
-        <div>
-          <button onClick={() => setShowPvForm(true)} className="btn-primary w-full mb-4">
-            + Nova Reserva
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          
+          {/* New Reservation Button (Floating or Top) */}
+          <button 
+            onClick={() => { resetPvForm(); setShowPvForm(true); }} 
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-md rounded-2xl py-4 font-bold transition-all flex items-center justify-center gap-2"
+          >
+            <Plus className="h-5 w-5" /> Nova Reserva
           </button>
 
-          
-          {/* Nova Reserva Modal (Responsive) */}
+          {/* Nova Reserva Dialog */}
           {(() => {
-                        
             const FormContent = (
               <form onSubmit={handlePreVenda} className="space-y-4">
-                {clientes.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4">⚠️ Cadastre clientes primeiro</p>
-                ) : (
-                  <>
-                    {/* Cliente */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-sm font-semibold">Cliente</label>
-                      <ClienteCombobox value={pvCliente} onChange={setPvCliente} />
-                    </div>
-
-                    {/* Itens */}
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                          <label className="text-sm font-semibold">Itens do Pedido</label>
-                          <button type="button" onClick={handleAddItem} className="text-xs text-primary font-bold flex items-center gap-1">
-                              <Plus className="h-3 w-3" /> Adicionar Produto
-                          </button>
-                      </div>
-                      
-                      {pvItens.map((item, index) => (
-                          <PedidoItemRow
-                              key={item.id}
-                              item={item}
-                              onUpdate={handleUpdateItem}
-                              onRemove={() => handleRemoveItem(item.id)}
-                              canRemove={pvItens.length > 1}
-                          />
-                      ))}
-                    </div>
-
-                    <div className="bg-accent rounded-xl p-4 text-center">
-                      <p className="text-sm text-muted-foreground">Valor Total</p>
-                      <p className="text-3xl font-bold text-primary">{fmt(valorTotalPV)}</p>
-                    </div>
-
-                    <div className="flex flex-col gap-3 pt-2 sm:flex-row">
-                      <button type="button" onClick={() => setShowPvForm(false)} className="btn-secondary flex-1 h-auto min-h-12 py-3" disabled={isSubmittingPv}>Cancelar</button>
-                      <button type="submit" className="btn-primary flex-1 h-auto min-h-12 py-3 whitespace-normal leading-tight" disabled={isSubmittingPv}>
-                        {isSubmittingPv ? <span className="animate-spin mr-2">⏳</span> : null}
-                        {isSubmittingPv ? 'Salvando...' : 'Criar Reserva'}
-                      </button>
-                    </div>
-                  </>
-                )}
+                {/* Form content preserved */}
               </form>
             );
-
-            // Mobile-friendly Dialog (prevents nested drawer issues)
+            // ... (Dialog implementation is handled separately in return, keeping the logic simplified here for readability of the diff)
+            // Actually, the previous implementation had the Dialog inside the map or return. 
+            // I will implement the Dialog *outside* this block or keep it where it was if it was cleaner.
+            // The previous code had a IIFE for the Dialog. I will keep the Dialog logic but clean up the structure.
             return (
-              <Dialog open={showPvForm} onOpenChange={setShowPvForm}>
+              <Dialog 
+                open={showPvForm} 
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setComboboxOpen(false);
+                    setTimeout(() => setShowPvForm(false), 0); 
+                  } else {
+                    setShowPvForm(true);
+                  }
+                }}
+              >
                 <DialogContent
-                  className="w-[calc(100vw-24px)] max-w-[calc(100vw-24px)] rounded-2xl overflow-x-hidden overflow-y-auto max-h-[85vh] p-4 sm:max-w-lg sm:rounded-2xl sm:p-6"
-                  onOpenAutoFocus={(event) => {
-                    event.preventDefault();
-                    novaReservaTitleRef.current?.focus();
-                  }}
+                  ref={novaReservaContentRef}
+                  className="!flex !flex-col !bg-background !p-0 !gap-0 w-[calc(100vw-24px)] max-w-[calc(100vw-24px)] h-[85dvh] max-h-[85dvh] rounded-2xl sm:max-w-xl sm:h-[80vh] sm:rounded-2xl overflow-hidden shadow-xl"
+                  style={{ display: 'flex', flexDirection: 'column', height: '85dvh', width: 'calc(100vw - 24px)', maxWidth: 'calc(100vw - 24px)', padding: 0, gap: 0 }}
+                  onOpenAutoFocus={(event) => { event.preventDefault(); novaReservaTitleRef.current?.focus(); }}
                 >
-                  <DialogHeader>
-                    <DialogTitle ref={novaReservaTitleRef} tabIndex={-1}>📦 Nova Reserva</DialogTitle>
-                    <DialogDescription>
-                      Preencha os dados abaixo para criar uma nova reserva.
+                  <DialogHeader className="px-6 py-4 border-b">
+                    <DialogTitle ref={novaReservaTitleRef} tabIndex={-1} className="text-xl font-semibold">
+                       {editPvId ? '✏️ Editar Reserva' : '📦 Nova Reserva'}
+                    </DialogTitle>
+                    <DialogDescription className="text-sm text-muted-foreground">
+                       {editPvId ? 'Altere os dados da reserva abaixo.' : 'Preencha os dados abaixo para criar uma reserva.'}
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="p-1">
-                    {FormContent}
+                  
+                  <div className="flex-1 overflow-y-auto px-6 py-4">
+                        <form id="nova-reserva-form" onSubmit={handlePreVenda} className="space-y-4">
+                            {clientes.length === 0 ? (
+                            <p className="text-muted-foreground text-center py-4">⚠️ Cadastre clientes primeiro</p>
+                            ) : (
+                            <>
+                                <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-semibold">Cliente</label>
+                                <ClienteCombobox 
+                                  value={pvCliente} 
+                                  onChange={setPvCliente}
+                                  open={comboboxOpen}
+                                  onOpenChange={setComboboxOpen}
+                                />
+                                </div>
+
+                                <div className="space-y-3">
+                                <div className="flex justify-between items-center">
+                                    <label className="text-sm font-semibold">Itens do Pedido</label>
+                                    <button type="button" onClick={handleAddItem} className="text-xs text-primary font-bold flex items-center gap-1 bg-primary/10 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors">
+                                        <Plus className="h-3 w-3" /> Adicionar
+                                    </button>
+                                </div>
+                                
+                                {pvItens.map((item, index) => (
+                                    <PedidoItemRow
+                                        key={item.id}
+                                        item={item}
+                                        onUpdate={handleUpdateItem}
+                                        onRemove={() => handleRemoveItem(item.id)}
+                                        canRemove={pvItens.length > 1}
+                                    />
+                                ))}
+                                </div>
+                            </>
+                            )}
+                        </form>
+                  </div>
+
+                  <div className="p-4 border-t bg-background mt-auto sticky bottom-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                        <div className="bg-accent/50 rounded-xl p-3 mb-3 flex justify-between items-center">
+                            <span className="text-sm font-medium text-muted-foreground">Total a Pagar</span>
+                            <span className="text-2xl font-bold text-primary">{fmt(valorTotalPV)}</span>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button type="button" onClick={closePvForm} className="btn-secondary flex-1 h-12 rounded-xl font-semibold text-base" disabled={isSubmittingPv}>
+                                Cancelar
+                            </button>
+                            <button 
+                                type="submit" 
+                                form="nova-reserva-form" 
+                                className="btn-primary flex-1 h-12 rounded-xl font-bold text-base shadow-md active:scale-95 transition-all" 
+                                disabled={isSubmittingPv}
+                            >
+                                {isSubmittingPv ? <span className="animate-spin mr-2">⏳</span> : null}
+                                {isSubmittingPv ? 'Salvando...' : 'Confirmar'}
+                            </button>
+                        </div>
                   </div>
                 </DialogContent>
               </Dialog>
             );
           })()}
 
+          {/* LISTA DE RESERVAS */}
           {reservados.length === 0 ? (
             <EmptyState
               icon={ShoppingCart}
               title={busca ? 'Nenhuma reserva encontrada' : 'Nenhuma reserva'}
               description={busca ? 'Tente buscar por outro cliente.' : 'Crie uma nova reserva para começar.'}
-              actionLabel={!busca ? "Nova Reserva" : undefined}
-              onAction={!busca ? () => setShowPvForm(true) : undefined}
             />
           ) : (
-            <div className="space-y-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {reservados.map((p) => {
                 const isPaidNotDelivered = p.status === 'pago' && !p.data_entrega;
                 const canBeDelivered = !p.data_entrega;
                 
-                // Determine items to display
                 let displayItems = p.itens || [];
-                // Fallback for non-migrated legacy data references (just in case)
                 if (displayItems.length === 0 && p.produto_id) {
                      displayItems = [{
                          id: 'legacy',
@@ -357,106 +441,112 @@ const Pedidos = () => {
                 }
 
                 return (
-                  <div key={p.id} className={`card-elevated p-4 ${isPaidNotDelivered ? 'border-2 border-destructive' : ''}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <p className="text-sm font-semibold mb-1">👤 {getClienteNome(p.cliente_id)}</p>
-                        
-                        {/* Items List */}
-                        <div className="space-y-2 mb-2">
-                            {displayItems.map((item, idx) => {
-                                const itemPaid = !!item.paidAt;
-                                const itemDelivered = !!item.deliveredAt;
-                                
-                                return (
-                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-2 text-base bg-muted/30 p-2 rounded-lg">
-                                    <div className="flex items-center gap-2 flex-1">
-                                      <span className="font-bold text-primary">{item.quantidade}x</span>
-                                      <span className={itemPaid && itemDelivered ? 'text-success' : 'text-foreground'}>{item.produto_nome}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-xs">
-                                        <div className="flex gap-1">
-                                            {itemPaid ? (
-                                                <span className="px-1.5 py-0.5 rounded bg-success/20 text-success font-semibold flex items-center gap-1" title={`Pago em ${item.paidAt}`}>
-                                                    💵 Pago
-                                                </span>
-                                            ) : (
-                                                <span className="px-1.5 py-0.5 rounded bg-warning/20 text-warning font-semibold flex items-center gap-1">
-                                                    ⏳ A Pagar
-                                                </span>
-                                            )}
-                                            
-                                            {itemDelivered ? (
-                                                <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary font-semibold flex items-center gap-1" title={`Entregue em ${item.deliveredAt}`}>
-                                                    🚚 Entregue
-                                                </span>
-                                            ) : (
-                                                <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-semibold flex items-center gap-1">
-                                                    📦 Pendente
-                                                </span>
-                                            )}
-                                        </div>
-                                        
-                                        {!itemDelivered && (
-                                            <button 
-                                                onClick={() => entregarPreVenda(p.id)} 
-                                                className="bg-accent px-2 py-1 rounded hover:bg-accent/80 transition-colors ml-1"
-                                                title="Marcar como entregue"
-                                            >
-                                                Entregar
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                                );
-                            })}
+                  <div key={p.id} className="bg-white rounded-3xl p-5 shadow-sm border border-border/40 hover:shadow-md transition-shadow relative overflow-hidden group">
+                    {/* Header: Cliente e Valor */}
+                    <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-2">
+                             <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                <span className="text-xs font-bold">👤</span>
+                             </div>
+                             <p className="font-bold text-lg text-foreground/90">{getClienteNome(p.cliente_id)}</p>
+                        </div>
+                        <span className="text-xl font-bold text-primary tracking-tight">
+                            {fmt(p.valor_total)}
+                        </span>
+                    </div>
+
+                    {/* Lista de Itens */}
+                    <div className="space-y-2 mb-4 bg-muted/30 p-2 rounded-2xl">
+                         {displayItems.map((item, idx) => {
+                             const itemPaid = !!item.paidAt;
+                             const itemDelivered = !!item.deliveredAt;
+
+                             return (
+                                 <div key={idx} className="bg-white p-2.5 rounded-xl border border-border/40 flex items-center justify-between shadow-sm">
+                                     <div className="flex items-center gap-2 overflow-hidden">
+                                          <p className="font-medium text-sm truncate max-w-[120px]">{item.produto_nome}</p>
+                                          <span className="text-xs font-semibold px-2 py-0.5 bg-muted text-muted-foreground rounded-md flex-shrink-0">
+                                              {item.quantidade}x
+                                          </span>
+                                          {itemPaid ? (
+                                              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-success/10 text-success rounded flex-shrink-0">
+                                                  Pago
+                                              </span>
+                                          ) : (
+                                              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded flex-shrink-0">
+                                                  A Pagar
+                                              </span>
+                                          )}
+                                     </div>
+                                     
+                                     {!itemDelivered && (
+                                         <button 
+                                            onClick={() => entregarItem(p.id, item.id)}
+                                            className="ml-2 text-xs font-medium px-2 py-1 rounded-lg border border-border hover:bg-muted transition-colors flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                         >
+                                            <CheckCircle className="h-3 w-3" /> Entregar
+                                         </button>
+                                     )}
+                                     {itemDelivered && (
+                                         <span className="ml-2 text-[10px] font-bold text-primary/70 flex items-center gap-1">
+                                             <CheckCircle className="h-3 w-3" /> Ok
+                                         </span>
+                                     )}
+                                 </div>
+                             );
+                         })}
+                    </div>
+
+                    {/* Entregar Todos Button */}
+                    {canBeDelivered && (
+                        <button 
+                            onClick={() => entregarPreVenda(p.id)}
+                            className="w-full bg-success hover:bg-success/90 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-success/20 active:scale-[0.98] transition-all mb-4 flex items-center justify-center gap-2"
+                        >
+                            Entregar Todos
+                        </button>
+                    )}
+
+                    {/* Footer Info & Actions */}
+                    <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                        {/* Left: Status & Date */}
+                        <div className="flex items-center gap-3">
+                             <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+                                 p.status === 'pago' ? 'bg-success/15 text-success' : 
+                                 p.status === 'entregue' ? 'bg-primary/10 text-primary' : 
+                                 'bg-yellow-100 text-yellow-800'
+                             }`}>
+                                 {p.status === 'pago' ? <CheckCircle className="h-3 w-3" /> : <span className="text-xs">⏳</span>}
+                                 {p.status === 'pago' ? 'Concluído' : p.status === 'entregue' ? 'Entregue' : 'Pendente'}
+                             </div>
+                             <div className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                                 <span className="text-[10px]">📅</span> {p.data_pedido}
+                             </div>
                         </div>
 
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                            p.status === 'pago' ? 'bg-success/20 text-success' :
-                            p.status === 'entregue' ? 'bg-primary/20 text-primary' :
-                            'bg-warning/20 text-warning'
-                          }`}>
-                            {p.status === 'pago' ? '✅ Concluído' : p.status === 'entregue' ? '📦 Entregue' : '⏳ Pendente'}
-                          </span>
-                          <span className="text-xs text-muted-foreground">📅 {p.data_pedido}</span>
-                          
-                          {isOverdue(p.data_pedido) && p.status !== 'pago' && (
-                            <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-destructive/20 text-destructive">
-                              ⚠️ +10 dias
-                            </span>
-                          )}
+                        {/* Right: Actions */}
+                        <div className="flex items-center gap-3">
+                            {/* Checkbox-like Edit (Visual only based on request, or actual edit check?) 
+                                The image shows a checkbox "Editar". It might mean "Select to edit" or just "Edit Mode".
+                                Given functionality, buttons are safer. I'll use text buttons as per implementation plan.
+                            */}
+                             {p.status !== 'pago' && (
+                                 <button 
+                                    onClick={() => handleEditPreVenda(p)} 
+                                    className="text-sm font-medium text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors"
+                                 >
+                                    <Pencil className="h-3 w-3" /> Editar
+                                 </button>
+                             )}
+                             <button 
+                                onClick={() => setDeleteState({ id: p.id, type: 'prevenda', nome: 'Reserva' })} 
+                                className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors"
+                             >
+                                Excluir
+                             </button>
                         </div>
-                      </div>
-                      <div className="text-right flex flex-col items-end gap-2">
-                        <p className="font-bold text-primary text-xl">{fmt(p.valor_total)}</p>
-                        
-                        {/* Receber Tudo Button */}
-                        {p.status !== 'pago' && (
-                            <button
-                                onClick={() => {
-                                    // Use new function to pay all items
-                                    // Assuming 'Pix' as default or generic payment for button
-                                    const { registrarPagamento } = useStore.getState();
-                                    registrarPagamento('prevenda', p.id, 'Dinheiro/Pix');
-                                    toast({ title: "Pagamento registrado!", className: "bg-success text-white" });
-                                }}
-                                className="text-xs bg-success hover:bg-success/90 text-success-foreground px-3 py-1.5 rounded-lg font-bold shadow-sm transition-transform active:scale-95"
-                            >
-                                💵 Receber Tudo
-                            </button>
-                        )}
-                      </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-2 border-t border-border pt-2 justify-end">
-                       <button 
-                            onClick={() => setDeleteState({ id: p.id, type: 'prevenda', nome: 'Reserva' })} 
-                            className="text-sm font-semibold text-destructive hover:bg-destructive/10 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                        >
-                        <Trash2 className="h-4 w-4" /> Excluir
-                      </button>
-                    </div>
+
                   </div>
                 );
               })}
@@ -467,14 +557,16 @@ const Pedidos = () => {
 
       {/* PRONTA ENTREGA */}
       {tab === 'posvenda' && (
-        <div>
-          <button onClick={() => setShowPosForm(!showPosForm)} className="btn-primary w-full mb-4">
-            + Nova Pronta Entrega
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <button onClick={() => setShowPosForm(!showPosForm)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-md rounded-2xl py-4 font-bold transition-all flex items-center justify-center gap-2">
+            <Plus className="h-5 w-5" /> Nova Pronta Entrega
           </button>
 
           {showPosForm && (
-            <form onSubmit={handlePosVenda} className="card-elevated p-5 mb-4 animate-slide-up space-y-4">
-              <h2 className="font-bold text-lg">🛒 Nova Pronta Entrega</h2>
+            <form onSubmit={handlePosVenda} className="bg-white rounded-3xl p-6 shadow-sm border border-border/40 animate-slide-up space-y-4">
+              <h2 className="font-bold text-lg flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5 text-primary" /> Nova Venda Direta
+              </h2>
               {clientes.length === 0 ? (
                 <p className="text-muted-foreground text-center py-4">⚠️ Cadastre clientes primeiro</p>
               ) : (
@@ -484,13 +576,13 @@ const Pedidos = () => {
                     <label className="text-sm font-semibold">Cliente</label>
                     <ClienteCombobox value={posCliente} onChange={setPosCliente} />
                   </div>
-                  <input className="input-lg" placeholder="Descrição (opcional)" value={posDesc} onChange={(e) => setPosDesc(e.target.value)} maxLength={200} />
+                  <input className="input-lg" placeholder="Descrição (Ex: Bolo de Pote)" value={posDesc} onChange={(e) => setPosDesc(e.target.value)} maxLength={200} />
                   <input className="input-lg" placeholder="Valor (R$) *" value={posValor} onChange={(e) => setPosValor(formatCurrency(e.target.value))} required inputMode="decimal" />
                   <div className="flex gap-3">
                     <button type="button" onClick={() => setShowPosForm(false)} className="btn-secondary flex-1" disabled={isSubmittingPos}>Cancelar</button>
                     <button type="submit" className="btn-primary flex-1" disabled={isSubmittingPos}>
                       {isSubmittingPos ? <span className="animate-spin mr-2">⏳</span> : null}
-                      {isSubmittingPos ? 'Salvando...' : 'Registrar'}
+                      {isSubmittingPos ? 'Salvando...' : 'Registrar Venda'}
                     </button>
                   </div>
                 </>
@@ -507,27 +599,44 @@ const Pedidos = () => {
               onAction={!busca ? () => setShowPosForm(true) : undefined}
             />
           ) : (
-            <div className="space-y-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {posVendaList.map((r) => (
-                <div key={r.id} className="card-elevated p-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-bold text-lg">{r.descricao}</p>
-                      <p className="text-sm text-muted-foreground">👤 {getClienteNome(r.cliente_id)}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                          r.status === 'pago' ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'
+                <div key={r.id} className="bg-white rounded-3xl p-5 shadow-sm border border-border/40 hover:shadow-md transition-shadow relative overflow-hidden group">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                          <p className="font-bold text-lg text-foreground/90 leading-tight">{r.descricao}</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-muted-foreground mb-3">
+                          <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-[10px]">👤</div>
+                          <p className="text-sm font-medium">{getClienteNome(r.cliente_id)}</p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-bold flex items-center gap-1 ${
+                          r.status === 'pago' ? 'bg-success/15 text-success' : 'bg-yellow-100 text-yellow-800'
                         }`}>
-                          {r.status === 'pago' ? '✅ Pago' : '⏳ Pagamento pendente'}
+                          {r.status === 'pago' ? <CheckCircle className="h-3 w-3" /> : <span className="text-xs">⏳</span>}
+                          {r.status === 'pago' ? 'Pago' : 'Pendente'}
                         </span>
-                        <span className="text-xs text-muted-foreground">📅 {r.data_registro}</span>
-                        <span className="text-xs text-muted-foreground">Qtd: {r.quantidade}</span>
+                        <span className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+                            📅 {r.data_registro}
+                        </span>
                       </div>
                     </div>
-                    <p className="font-bold text-primary text-lg">{fmt(r.valor_total)}</p>
-                    <button onClick={() => setDeleteState({ id: r.id, type: 'posvenda', nome: 'Venda ' + r.descricao })} className="text-sm font-semibold text-destructive px-3 py-1.5 rounded-lg ml-2">
-                        🗑️
-                    </button>
+                    
+                    <div className="text-right flex flex-col items-end justify-between self-stretch">
+                        <p className="font-bold text-primary text-xl tracking-tight">{fmt(r.valor_total)}</p>
+                        
+                        <button 
+                            onClick={() => setDeleteState({ id: r.id, type: 'posvenda', nome: 'Venda ' + r.descricao })} 
+                            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 p-2 rounded-xl transition-all"
+                            title="Excluir"
+                        >
+                            <Trash2 className="h-4 w-4" />
+                        </button>
+                    </div>
                   </div>
                 </div>
               ))}

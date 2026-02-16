@@ -64,7 +64,7 @@ export const PedidoItemRow = ({
 
   return (
     <div className="p-3 border rounded-xl bg-card shadow-sm space-y-3">
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3">
         {/* Seletor de Produto (Combobox) */}
         <div className="flex-1 min-w-0">
           <Label htmlFor={`produto-${item.id}`} className="text-xs mb-1.5 block font-semibold text-muted-foreground">
@@ -88,29 +88,31 @@ export const PedidoItemRow = ({
         </div>
 
         {/* Quantidade */}
-        <div className="w-20">
+        <div className="w-full sm:w-24">
           <Label htmlFor={`qtd-${item.id}`} className="text-xs mb-1.5 block font-semibold text-muted-foreground">
             Qtd
           </Label>
-          <Input
-            id={`qtd-${item.id}`}
-            type="number"
-            min="1"
-            value={qtdInput}
-            onChange={(e) => {
-                setQtdInput(e.target.value);
-                const val = parseInt(e.target.value);
-                if (!isNaN(val) && val >= 1) {
-                    onUpdate({
-                        ...item,
-                        quantidade: val,
-                        subtotal: item.preco_unitario * val
-                    });
-                }
-            }}
-            onBlur={handleBlur}
-            className="text-center h-10"
-          />
+          <div className="flex items-center">
+            <Input
+                id={`qtd-${item.id}`}
+                type="number"
+                min="1"
+                value={qtdInput}
+                onChange={(e) => {
+                    setQtdInput(e.target.value);
+                    const val = parseInt(e.target.value);
+                    if (!isNaN(val) && val >= 1) {
+                        onUpdate({
+                            ...item,
+                            quantidade: val,
+                            subtotal: item.preco_unitario * val
+                        });
+                    }
+                }}
+                onBlur={handleBlur}
+                className="text-center h-10 w-full"
+            />
+          </div>
         </div>
       </div>
 

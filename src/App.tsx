@@ -53,7 +53,7 @@ const App = () => {
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <div className="flex min-h-screen bg-background text-foreground">
           {/* Sidebar visible only on desktop */}
           <Sidebar />

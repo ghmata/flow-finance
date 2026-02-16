@@ -22,10 +22,15 @@ import { useIsMobile } from "@/hooks/use-mobile";
 interface ClienteComboboxProps {
   value: string;
   onChange: (value: string) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export const ClienteCombobox = ({ value, onChange }: ClienteComboboxProps) => {
-  const [open, setOpen] = useState(false);
+export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenChange: externalOnOpenChange }: ClienteComboboxProps) => {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const setOpen = externalOnOpenChange || setInternalOpen;
+  
   const [inputValue, setInputValue] = useState("");
   const clientes = useStore((state) => state.clientes);
   const inputRef = useRef<HTMLInputElement>(null);

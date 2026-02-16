@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useStore } from '@/store/useStore';
 import PagamentoModal from '@/components/PagamentoModal';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PartyPopper, PackageCheck, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { PartyPopper, PackageCheck, CheckCircle, ChevronDown, ChevronUp, CircleDollarSign } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 type AbaReceber = 'areceber' | 'pagos';
 
@@ -21,7 +22,7 @@ const Devedores = () => {
     itemId: string; // Granular item ID
     clienteNome: string;
     valor: number;
-    isBatch?: boolean;
+    isBatch?: boolean; // New flag
     batchItemIds?: string[];
   } | null>(null);
 
@@ -29,6 +30,45 @@ const Devedores = () => {
   const toggleClient = (id: string) => {
       setExpandedClients(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
   };
+  
+  // Helper to handle batch payment logic
+  const processBatchPayment = (clienteId: string, formaPagamento: string, valorPago?: number) => {
+      // Find the client data
+      const dev = devedores.find(d => d.cliente.id === clienteId);
+      if (!dev) return;
+
+      const unpaidItems = dev.itens.filter((i: any) => !i.paidAt);
+      
+      // Calculate total debt for proportional distribution if valorPago is present
+      const totalDebt = unpaidItems.reduce((acc: number, i: any) => acc + i.valor, 0);
+
+      // Group by Order ID (referenciaId)
+      const ordersMap = new Map<string, { itemIds: string[], total: number }>();
+      unpaidItems.forEach((i: any) => {
+          const refId = i.id; // Order ID
+          if (!ordersMap.has(refId)) {
+                ordersMap.set(refId, { itemIds: [], total: 0 });
+          }
+          const entry = ordersMap.get(refId)!;
+          entry.itemIds.push(i.itemId);
+          entry.total += i.valor;
+      });
+      
+      const { registrarPagamentoEmLote } = useStore.getState();
+      
+      ordersMap.forEach(({ itemIds, total }, orderId) => {
+          const tipo = unpaidItems.find((i: any) => i.id === orderId)?.tipo || 'prevenda';
+          
+          let orderPaymentValue: number | undefined = undefined;
+          if (valorPago !== undefined && totalDebt > 0) {
+              // Proportional payment: (OrderTotal / TotalDebt) * GlobalPayment
+              orderPaymentValue = (total / totalDebt) * valorPago;
+          }
+
+          registrarPagamentoEmLote(tipo as any, orderId, itemIds, formaPagamento, orderPaymentValue);
+      });
+  };
+
 
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
@@ -211,7 +251,23 @@ const Devedores = () => {
                         {expandedClients.includes(dev.cliente.id) ? 'Ocultar itens' : `Ver ${dev.itens.length} itens`}
                       </button>
                       
-                      {/* Batch payment button logic would go here if implemented properly */}
+                      {/* Batch Payment Button */}
+                      <Button
+                        onClick={() => {
+                            setPagModal({
+                                tipo: 'prevenda', // Dummy
+                                referenciaId: dev.cliente.id, // We use this as client ID for batch
+                                itemId: '', 
+                                clienteNome: dev.cliente.nome,
+                                valor: dev.total,
+                                isBatch: true
+                            });
+                        }}
+                        className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition-all ml-2 h-10"
+                      >
+                        <CircleDollarSign className="mr-2 h-4 w-4" />
+                        Receber Tudo ({fmt(dev.total)})
+                      </Button>
                   </div>
                 </div>
               ))}
@@ -266,11 +322,11 @@ const Devedores = () => {
           referenciaId={pagModal.referenciaId}
           clienteNome={pagModal.clienteNome}
           valor={pagModal.valor}
-          // Pass granular props check if PagamentoModal supports it?
-          // We need to modify PagamentoModal to support granular payment logic
-          // Or we pass a custom onConfirm?
-          // Let's modify PagamentoModal next.
           itemId={pagModal.itemId}
+          onConfirm={pagModal.isBatch 
+            ? (forma, valor) => processBatchPayment(pagModal.referenciaId, forma, valor) 
+            : undefined
+          }
         />
       )}
     </div>

@@ -35,7 +35,8 @@ export interface PedidoPreVenda {
   
   itens: PedidoItem[];
   valor_total: number;
-  status: 'pendente' | 'entregue' | 'pago';
+  valor_pago?: number; // Total amount paid so far
+  status: 'pendente' | 'entregue' | 'pago' | 'parcial';
   data_pedido: string;
   data_entrega?: string;
   data_pagamento?: string;
@@ -51,7 +52,8 @@ export interface RegistroPosVenda {
   itens: PedidoItem[];
   quantidade: number; // Total quantity (sum of items) or legacy
   valor_total: number;
-  status: 'aberto' | 'pago';
+  valor_pago?: number; // Total amount paid so far
+  status: 'aberto' | 'pago' | 'parcial';
   data_registro: string;
   data_pagamento?: string;
   forma_pagamento?: string;
