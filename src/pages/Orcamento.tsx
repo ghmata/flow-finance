@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
 import { CATEGORIAS_DESPESA, CATEGORIAS_RECEITA } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { Card, CardContent } from '@/components/ui/card';
-import { User, TrendingUp, Calendar, CalendarOff, ShoppingBag, ChevronLeft, ChevronRight, Wallet, CreditCard } from 'lucide-react';
+import { User, TrendingUp, Calendar, CalendarOff, ShoppingBag, ChevronLeft, ChevronRight, Wallet, CreditCard, Search } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatCurrency, parseCurrency } from '@/utils/masks';
 
@@ -57,12 +57,15 @@ const CHART_COLORS = [
   };
 
 const Orcamento = () => {
-  const { despesas, receitas, clientes, pedidosPreVenda, registrosPosVenda, addDespesa, deleteDespesa, addReceitaManual } = useStore();
+  const { despesas, receitas, clientes, pedidosPreVenda, registrosPosVenda, pagamentos, addDespesa, deleteDespesa, addReceitaManual } = useStore();
   const [tab, setTab] = useState<OrcTab>('resumo');
+  useEffect(() => { setSearchTerm(''); }, [tab]);
   const [selectedDate, setSelectedDate] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [showDespForm, setShowDespForm] = useState(false);
   const [dDesc, setDDesc] = useState('');
@@ -95,8 +98,26 @@ const Orcamento = () => {
   const mesKey = selectedDate;
   const weeks = useMemo(() => getWeeksOfMonth(year, month), [year, month]);
 
-  const despMes = despesas.filter((d) => d.data_despesa.startsWith(mesKey));
-  const recMes = receitas.filter((r) => r.data_receita.startsWith(mesKey));
+  const despMes = useMemo(() => {
+    return despesas
+      .filter((d) => d.data_despesa.startsWith(mesKey) && d.descricao.toLowerCase().includes(searchTerm.toLowerCase()))
+      .sort((a, b) => {
+          const dateDiff = b.data_despesa.localeCompare(a.data_despesa);
+          if (dateDiff !== 0) return dateDiff;
+          return (b.created_at || '').localeCompare(a.created_at || '');
+      });
+  }, [despesas, mesKey, searchTerm]);
+
+  const recMes = useMemo(() => {
+    return receitas
+      .filter((r) => r.data_receita.startsWith(mesKey) && r.descricao.toLowerCase().includes(searchTerm.toLowerCase()))
+      .sort((a, b) => {
+        const dateDiff = b.data_receita.localeCompare(a.data_receita);
+        if (dateDiff !== 0) return dateDiff;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+    });
+  }, [receitas, mesKey, searchTerm]);
+
   const totalDesp = despMes.reduce((a, d) => a + d.valor, 0);
   const totalRec = recMes.reduce((a, r) => a + r.valor, 0);
   const saldo = totalRec - totalDesp;
@@ -445,9 +466,21 @@ const Orcamento = () => {
       {/* RECEITAS */}
       {tab === 'receitas' && (
         <div>
-          <button onClick={() => setShowRecForm(!showRecForm)} className="btn-primary w-full mb-4">
-            + Receita Manual
-          </button>
+          <div className="flex gap-2 mb-4">
+            <button onClick={() => setShowRecForm(!showRecForm)} className="btn-primary flex-1">
+              + Receita Manual
+            </button>
+          </div>
+          
+          <div className="relative mb-4">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <input 
+                  className="input-lg w-full pl-9" 
+                  placeholder="Pesquisar receita..." 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+              />
+          </div>
 
           {showRecForm && (
             <form onSubmit={handleAddReceita} className="card-elevated p-5 mb-4 animate-slide-up space-y-3">
@@ -479,26 +512,91 @@ const Orcamento = () => {
             />
           ) : (
             <div className="space-y-2">
-              {recMes.map((r) => (
-                <div key={r.id} className="card-elevated p-3 flex items-center justify-between" style={{ backgroundColor: 'hsl(160 84% 39% / 0.05)' }}>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span>💰</span>
-                      <p className="font-semibold">{r.descricao}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded font-semibold ${
-                        r.origem === 'pagamento' ? 'bg-success/20 text-success' : 'bg-accent text-accent-foreground'
-                      }`}>
-                        {r.origem === 'pagamento' ? 'Automática' : 'Manual'}
-                      </span>
+              {recMes.map((r) => {
+                // Find associated order details if available
+                let detalhesPedido = null;
+                if (r.origem === 'pagamento' && r.referencia_pagamento_id) {
+                    // Try to find the payment first to get the real order ID
+                    const pagamento = pagamentos.find(p => p.id === r.referencia_pagamento_id);
+                    
+                    if (pagamento) {
+                        if (pagamento.tipo === 'prevenda') {
+                             const pedidoPre = pedidosPreVenda.find(p => p.id === pagamento.referencia_id);
+                             if (pedidoPre) {
+                                  detalhesPedido = {
+                                      tipo: 'Reserva',
+                                      cliente: clientes.find(c => c.id === pedidoPre.cliente_id)?.nome || 'Cliente Desconhecido',
+                                      itens: pedidoPre.itens.map(i => `${i.quantidade}x ${i.produto_nome}`).join(', ')
+                                  };
+                             }
+                        } else {
+                             const pedidoPos = registrosPosVenda.find(p => p.id === pagamento.referencia_id);
+                             if (pedidoPos) {
+                                  detalhesPedido = {
+                                      tipo: 'Pronta Entrega',
+                                      cliente: clientes.find(c => c.id === pedidoPos.cliente_id)?.nome || 'Cliente Desconhecido',
+                                      descricao: pedidoPos.descricao
+                                  };
+                             }
+                        }
+                    } else {
+                         // Fallback logic if payment missing (legacy or error) -> try direct lookup if IDs match (unlikely but safe)
+                         const pedidoPre = pedidosPreVenda.find(p => p.id === r.referencia_pagamento_id);
+                         if (pedidoPre) {
+                                detalhesPedido = {
+                                    tipo: 'Reserva',
+                                    cliente: clientes.find(c => c.id === pedidoPre.cliente_id)?.nome || 'Cliente Desconhecido',
+                                    itens: pedidoPre.itens?.map(i => `${i.quantidade}x ${i.produto_nome}`).join(', ') || ''
+                                };
+                         }
+                    }
+                }
+
+                return (
+                <div key={r.id} className="card-elevated p-3 flex flex-col gap-2" style={{ backgroundColor: 'hsl(160 84% 39% / 0.05)' }}>
+                  <div className="flex justify-between items-start gap-3 mb-1">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span>💰</span>
+                            <p className="font-semibold break-words leading-tight">{r.descricao}</p>
+                            <span className={`text-xs px-2 py-0.5 rounded font-semibold whitespace-nowrap ${
+                                r.origem === 'pagamento' ? 'bg-success/20 text-success' : 'bg-accent text-accent-foreground'
+                            }`}>
+                                {r.origem === 'pagamento' ? 'Automática' : 'Manual'}
+                            </span>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>📅 {r.data_receita}</span>
-                      {r.forma_recebimento && <span>💳 {r.forma_recebimento}</span>}
-                    </div>
+                    <p className="font-bold text-success text-lg shrink-0 whitespace-nowrap">+ {fmt(r.valor)}</p>
                   </div>
-                  <p className="font-bold text-success text-lg ml-3">+ {fmt(r.valor)}</p>
+                  
+                  <div className="flex flex-col gap-1 text-xs text-muted-foreground ml-6">
+                      <div className="flex gap-3">
+                        <span>📅 {r.data_receita}</span>
+                        {r.forma_recebimento && <span>💳 {r.forma_recebimento}</span>}
+                      </div>
+                      
+                      {/* Detailed info for automatic payments */}
+                      {detalhesPedido && (
+                          <div className="mt-1 p-2 bg-white/50 rounded border border-success/10">
+                              <p className="font-semibold text-gray-700 mb-0.5">
+                                  {detalhesPedido.tipo} - {detalhesPedido.cliente}
+                              </p>
+                              {detalhesPedido.itens && (
+                                  <p className="text-gray-600 leading-tight">
+                                      Itens: {detalhesPedido.itens}
+                                  </p>
+                              )}
+                              {detalhesPedido.descricao && (
+                                  <p className="text-gray-600 leading-tight">
+                                      {detalhesPedido.descricao}
+                                  </p>
+                              )}
+                          </div>
+                      )}
+                  </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>
@@ -507,9 +605,21 @@ const Orcamento = () => {
       {/* DESPESAS */}
       {tab === 'despesas' && (
         <div>
-          <button onClick={() => setShowDespForm(!showDespForm)} className="btn-primary w-full mb-4">
-            + Nova Despesa
-          </button>
+          <div className="flex gap-2 mb-4">
+            <button onClick={() => setShowDespForm(!showDespForm)} className="btn-primary flex-1">
+              + Nova Despesa
+            </button>
+          </div>
+
+          <div className="relative mb-4">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <input 
+                  className="input-lg w-full pl-9" 
+                  placeholder="Pesquisar despesa..." 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+              />
+          </div>
 
           {showDespForm && (
             <form onSubmit={handleAddDespesa} className="card-elevated p-5 mb-4 animate-slide-up space-y-3">
@@ -546,7 +656,7 @@ const Orcamento = () => {
             />
           ) : (
              <div className="space-y-4">
-               {weeks.map((w) => {
+               {[...weeks].reverse().map((w) => {
                  const wDesp = despMes.filter((d) => { const dt = new Date(d.data_despesa); return dt >= w.inicio && dt <= w.fim; });
                  if (wDesp.length === 0) return null;
                  const sub = wDesp.reduce((a, d) => a + d.valor, 0);

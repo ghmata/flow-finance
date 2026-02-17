@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import { Cliente, Produto, PedidoPreVenda, RegistroPosVenda, Pagamento, Despesa, Receita } from '@/types';
+import { Cliente, Produto, PedidoPreVenda, RegistroPosVenda, Pagamento, Despesa, Receita, ScheduledOrder, AuditLog, NotificationLog } from '@/types';
 
 // ⭐ NOVA INTERFACE
 export interface Configuracao {
@@ -20,6 +20,11 @@ class FlowFinanceDB extends Dexie {
   
   // ⭐ NOVA TABELA
   configuracoes!: EntityTable<Configuracao, 'id'>;
+  
+  // ⭐ NOVAS TABELAS (Task Schema Update)
+  scheduledOrders!: EntityTable<ScheduledOrder, 'orderId'>;
+  auditLogs!: EntityTable<AuditLog, 'id'>;
+  notificationLogs!: EntityTable<NotificationLog, 'id'>;
 
   constructor() {
     super('FlowFinanceDB');
@@ -97,7 +102,7 @@ class FlowFinanceDB extends Dexie {
       
       // Update RegistrosPosVenda items
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-       await trans.table('registrosPosVenda').toCollection().modify((registro: any) => {
+      await trans.table('registrosPosVenda').toCollection().modify((registro: any) => {
         if (registro.itens && Array.isArray(registro.itens)) {
            const finalItens = registro.itens.map((item: any) => ({
              ...item,
@@ -109,6 +114,13 @@ class FlowFinanceDB extends Dexie {
         }
       });
       console.log('[Migration v3] Migração granular concluída.');
+    });
+    
+    // NEW VERSION 4 FOR SCHEDULING
+    this.version(4).stores({
+      scheduledOrders: '&orderId, scheduledDate, status, [scheduledDate+status]',
+      auditLogs: '++id, orderId, action, timestamp',
+      notificationLogs: '++id, orderId, type, status, sentAt'
     });
   }
 }

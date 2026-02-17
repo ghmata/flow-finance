@@ -19,7 +19,15 @@ import { seedDatabase } from "@/lib/seed-database";
 
 const queryClient = new QueryClient();
 
+// Import hook
+import { useScheduler } from "@/hooks/useScheduler";
+
 const App = () => {
+  useScheduler(); // Start background scheduler
+  
+  // Import verification script (helper) - Uncomment to run verification
+  // import("@/test/verify-schedule");
+
   const initStore = useStore((state) => state.init);
   const [isInitializing, setIsInitializing] = useState(true);
 

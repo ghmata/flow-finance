@@ -36,12 +36,31 @@ export interface PedidoPreVenda {
   itens: PedidoItem[];
   valor_total: number;
   valor_pago?: number; // Total amount paid so far
-  status: 'pendente' | 'entregue' | 'pago' | 'parcial';
+  status: 'pendente' | 'entregue' | 'pago' | 'parcial' | 'agendado' | 'cancelado' | 'pronta_entrega' | 'em_preparacao'; // Extended status
   data_pedido: string;
   data_entrega?: string;
   data_pagamento?: string;
   forma_pagamento?: string;
   observacoes?: string;
+  
+  // New fields for scheduling/ready flow
+  scheduledDate?: string;
+  scheduledTime?: string;
+  removedFromReady?: {
+    timestamp: string;
+    previousStatus: string;
+    reason?: string;
+    userId?: string;
+    canUndo: boolean;
+    undoExpiresAt?: string;
+  };
+  history?: Array<{
+    action: string;
+    timestamp: string;
+    userId?: string;
+    reason?: string;
+    [key: string]: any;
+  }>;
 }
 
 export interface RegistroPosVenda {
@@ -79,6 +98,7 @@ export interface Despesa {
   data_pagamento?: string;
   forma_pagamento?: string;
   observacoes?: string;
+  created_at?: string; // New field for precise sorting
 }
 
 export interface Receita {
@@ -91,7 +111,74 @@ export interface Receita {
   referencia_pagamento_id?: string;
   forma_recebimento?: string;
   observacoes?: string;
+  created_at?: string; // New field for precise sorting
 }
+
+// NEW INTERFACES FOR SCHEDULING & LOGS
+
+export interface ScheduledOrder {
+  orderId: string; // References PedidoPreVenda.id
+  scheduledDate: string; // YYYY-MM-DD
+  scheduledTime: string; // HH:mm
+  timezone: string;
+  status: 'scheduled' | 'ready_for_delivery' | 'delivered' | 'cancelled';
+  notifications: {
+    dayBefore: { sent: boolean; sentAt?: string; method: string };
+    morningOf: { sent: boolean; sentAt?: string };
+    oneHourBefore: { sent: boolean; sentAt?: string };
+  };
+  autoMoveToReady: boolean;
+  createdAt: string;
+  createdBy?: string;
+  customer: {
+    id: string;
+    name: string;
+    phone?: string;
+  };
+  items: PedidoItem[];
+  total: number;
+  address?: string; // If applicable
+  
+  rescheduled?: {
+    oldDate: string;
+    oldTime: string;
+    newDate: string;
+    newTime: string;
+    reason?: string;
+    timestamp: string;
+  };
+  cancelledAt?: string;
+  cancelReason?: string;
+  movedToReadyAt?: string;
+  deliveredAt?: string;
+  deliveredBy?: string;
+}
+
+export interface AuditLog {
+  id?: number; // Auto-incremented
+  orderId?: string;
+  action: string;
+  userId?: string; // If we implement auth later
+  timestamp: string;
+  reason?: string;
+  details?: any; // JSON object for extra data (dataBefore, dataAfter, etc)
+}
+
+export interface NotificationLog {
+  id?: number; // Auto-incremented
+  orderId: string;
+  type: string;
+  title: string;
+  body: string;
+  priority: string;
+  data?: any;
+  sentAt: string;
+  status: 'pending' | 'sent' | 'failed';
+  error?: string;
+  retryCount?: number;
+  externalId?: string;
+}
+
 
 export const CATEGORIAS_DESPESA = [
   { nome: 'Ingredientes', emoji: '🥚' },

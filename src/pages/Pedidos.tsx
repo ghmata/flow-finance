@@ -29,7 +29,10 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { formatCurrency, parseCurrency } from '@/utils/masks';
 import { ClienteCombobox } from '@/components/pedidos/ClienteCombobox';
 import { PedidoItemRow } from '@/components/pedidos/PedidoItemRow'; // We need this
-import { PedidoItem } from '@/types'; // And this
+import { PedidoItem, PedidoPreVenda } from '@/types'; // And this
+import { format, parseISO, isToday, isTomorrow, isYesterday, isValid } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { NovaReservaModal } from '@/components/pedidos/NovaReservaModal';
 
 type Tab = 'prevenda' | 'posvenda';
 
@@ -66,32 +69,21 @@ const Pedidos = () => {
     setDeleteState(null);
   };
 
-  // Pré-venda form
-  const [showPvForm, setShowPvForm] = useState(false);
-  const [comboboxOpen, setComboboxOpen] = useState(false);
-  const novaReservaContentRef = useRef<HTMLDivElement>(null);
-  
-  // Blur focus when Dialog closes to prevent aria-hidden errors
-  useEffect(() => {
-      if (!showPvForm) {
-          // Fecha Combobox primeiro
-          setComboboxOpen(false);
+  // Modal state
+  const [showNovaReservaModal, setShowNovaReservaModal] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<PedidoPreVenda | null>(null);
 
-          const timer = setTimeout(() => {
-              const activeElement = document.activeElement as HTMLElement;
-              // Check if focus is still inside the dialog content (or what was the dialog content)
-              if (novaReservaContentRef.current?.contains(activeElement)) {
-                  activeElement.blur();
-              }
-          }, 50); // Small delay to allow closing animation to start
-          return () => clearTimeout(timer);
-      }
-  }, [showPvForm]);
-  const [pvCliente, setPvCliente] = useState('');
-  // New state for items
-  const [pvItens, setPvItens] = useState<PedidoItem[]>([
-    { id: 'init-1', produto_id: '', produto_nome: '', quantidade: 1, preco_unitario: 0, subtotal: 0 }
-  ]);
+  const handleEditPreVenda = (pedido: PedidoPreVenda) => {
+      setEditingOrder(pedido);
+      setShowNovaReservaModal(true);
+  };
+
+  const handleOpenNovaReserva = () => {
+      setEditingOrder(null);
+      setShowNovaReservaModal(true);
+  };
+
+  const [isSubmittingPos, setIsSubmittingPos] = useState(false);
   
   // Pós-venda form
   const [showPosForm, setShowPosForm] = useState(false);
@@ -100,98 +92,7 @@ const Pedidos = () => {
   const [posValor, setPosValor] = useState('');
   const [openPosCliente, setOpenPosCliente] = useState(false); 
 
-  // Edit pre-venda (Need to update this later for items, or disable edit for now?)
-  // For MVP of this feature, maybe disable deep edit or just allow deleting/recreating.
-  // The implementation plan didn't specify full edit support, but let's keep the state for now.
-  const [editPvId, setEditPvId] = useState<string | null>(null);
-  const [editPvQtd, setEditPvQtd] = useState(1);
-
-  const valorTotalPV = pvItens.reduce((acc, item) => acc + item.subtotal, 0);
-
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
-
-  const [isSubmittingPv, setIsSubmittingPv] = useState(false);
-  const novaReservaTitleRef = useRef<HTMLHeadingElement>(null);
-
-  const handleAddItem = () => {
-    setPvItens([...pvItens, { id: `new-${Date.now()}`, produto_id: '', produto_nome: '', quantidade: 1, preco_unitario: 0, subtotal: 0 }]);
-  };
-
-  const handleRemoveItem = (id: string) => {
-    if (pvItens.length <= 1) return;
-    setPvItens(pvItens.filter(i => i.id !== id));
-  };
-
-  const handleUpdateItem = (updatedItem: PedidoItem) => {
-    setPvItens(pvItens.map(i => i.id === updatedItem.id ? updatedItem : i));
-  };
-
-  const handlePreVenda = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const validItens = pvItens.filter(i => i.produto_id && i.quantidade > 0);
-    
-    if (!pvCliente) {
-        toast({ title: "Selecione um cliente", variant: "destructive" });
-        return;
-    }
-    if (validItens.length === 0) {
-        toast({ title: "Adicione pelo menos um produto", variant: "destructive" });
-        return;
-    }
-    
-    setIsSubmittingPv(true);
-    try {
-      let success = false;
-      if (editPvId) {
-          success = await updatePreVenda(editPvId, { cliente_id: pvCliente, itens: validItens });
-      } else {
-          success = await addPreVenda(pvCliente, validItens);
-      }
-
-      if (success) {
-        toast({ title: editPvId ? "Reserva atualizada!" : "Reserva criada!", className: "bg-success text-white border-none" });
-        resetPvForm();
-        setShowPvForm(false);
-      } else {
-        toast({ title: "Erro ao salvar reserva", variant: "destructive" });
-      }
-    } catch (error: unknown) {
-      console.error('[Pedidos] Erro fatal (PreVenda):', error);
-      const msg = error instanceof Error ? error.message : "Erro desconhecido";
-      toast({ title: "Erro inesperado", description: msg, variant: "destructive" });
-    } finally {
-      setIsSubmittingPv(false);
-    }
-  };
-
-  const resetPvForm = () => {
-      setPvItens([{ id: `init-${Date.now()}`, produto_id: '', produto_nome: '', quantidade: 1, preco_unitario: 0, subtotal: 0 }]);
-      setPvCliente('');
-      setEditPvId(null);
-  };
-
-  const handleEditPreVenda = (pedido: any) => {
-      setPvCliente(pedido.cliente_id);
-      // Ensure we have a valid list for editing, copying to avoid mutation issues
-      const itens = pedido.itens && pedido.itens.length > 0 
-          ? pedido.itens.map((i: any) => ({ ...i })) 
-          : [{ id: `legacy-${Date.now()}`, produto_id: pedido.produto_id, produto_nome: getProdutoNome(pedido.produto_id), quantidade: pedido.quantidade || 1, preco_unitario: pedido.valor_unitario || 0, subtotal: pedido.valor_total }];
-      
-      setPvItens(itens);
-      setEditPvId(pedido.id);
-      setShowPvForm(true);
-  };
-
-  const closePvForm = () => {
-      setComboboxOpen(false); // Ensure combobox closes
-      setShowPvForm(false);
-      // resetPvForm() is called when opening or explicitly resetting, 
-      // but let's keep it here if that was the intent, or maybe we want to preserve state?
-      // The original code called resetPvForm().
-      resetPvForm();
-  };
-
-  const [isSubmittingPos, setIsSubmittingPos] = useState(false);
 
   // ... (handlePosVenda remains same mostly, handled separately or skipped here)
   const handlePosVenda = async (e: React.FormEvent) => {
@@ -238,6 +139,62 @@ const Pedidos = () => {
       return 0;
     });
   }, [pedidosPreVenda, busca, getClienteNome, showConcluidos]);
+
+  // Collapsible state for date groups
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+  
+  const toggleDay = (date: string) => {
+    setCollapsedDays(prev => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  };
+
+  
+  // Group by date
+  const groupedReservados = useMemo(() => {
+     const groups: Record<string, PedidoPreVenda[]> = {};
+     
+     reservados.forEach(p => {
+         // Use scheduledDate if available, otherwise 'sem_data' or maybe data_pedido?
+         // If status is 'agendado', it SHOULD have a date.
+         // If it's 'pendente', it might be timeless queue.
+         const dateKey = p.scheduledDate || 'sem_data';
+         if (!groups[dateKey]) groups[dateKey] = [];
+         groups[dateKey].push(p);
+     });
+     
+     // Sort keys: 'sem_data' last? Dates chronological.
+     const keys = Object.keys(groups).sort((a, b) => {
+         if (a === 'sem_data') return 1;
+         if (b === 'sem_data') return -1;
+         return a.localeCompare(b);
+     });
+     
+     return keys.map(key => ({
+         date: key,
+         orders: groups[key]
+     }));
+  }, [reservados]);
+
+  const formatDateHeader = (dateStr: string) => {
+      if (dateStr === 'sem_data') return '📅 Sem Agendamento / Fila';
+      try {
+          const date = parseISO(dateStr);
+          if (!isValid(date)) return 'Data Inválida';
+          
+          let prefix = '';
+          if (isToday(date)) prefix = 'Hoje, ';
+          else if (isTomorrow(date)) prefix = 'Amanhã, ';
+          else if (isYesterday(date)) prefix = 'Ontem, ';
+          
+          return `${prefix}${format(date, "EEEE, dd 'de' MMMM", { locale: ptBR })}`;
+      } catch (e) {
+          return dateStr;
+      }
+  };
 
   const posVendaList = useMemo(() => {
     return registrosPosVenda.filter((r) => {
@@ -306,251 +263,192 @@ const Pedidos = () => {
           
           {/* New Reservation Button (Floating or Top) */}
           <button 
-            onClick={() => { resetPvForm(); setShowPvForm(true); }} 
+            onClick={handleOpenNovaReserva} 
             className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-md rounded-2xl py-4 font-bold transition-all flex items-center justify-center gap-2"
           >
             <Plus className="h-5 w-5" /> Nova Reserva
           </button>
 
-          {/* Nova Reserva Dialog */}
-          {(() => {
-            const FormContent = (
-              <form onSubmit={handlePreVenda} className="space-y-4">
-                {/* Form content preserved */}
-              </form>
-            );
-            // ... (Dialog implementation is handled separately in return, keeping the logic simplified here for readability of the diff)
-            // Actually, the previous implementation had the Dialog inside the map or return. 
-            // I will implement the Dialog *outside* this block or keep it where it was if it was cleaner.
-            // The previous code had a IIFE for the Dialog. I will keep the Dialog logic but clean up the structure.
-            return (
-              <Dialog 
-                open={showPvForm} 
-                onOpenChange={(open) => {
-                  if (!open) {
-                    setComboboxOpen(false);
-                    setTimeout(() => setShowPvForm(false), 0); 
-                  } else {
-                    setShowPvForm(true);
-                  }
-                }}
-              >
-                <DialogContent
-                  ref={novaReservaContentRef}
-                  className="!flex !flex-col !bg-background !p-0 !gap-0 w-[calc(100vw-24px)] max-w-[calc(100vw-24px)] h-[85dvh] max-h-[85dvh] rounded-2xl sm:max-w-xl sm:h-[80vh] sm:rounded-2xl overflow-hidden shadow-xl"
-                  style={{ display: 'flex', flexDirection: 'column', height: '85dvh', width: 'calc(100vw - 24px)', maxWidth: 'calc(100vw - 24px)', padding: 0, gap: 0 }}
-                  onOpenAutoFocus={(event) => { event.preventDefault(); novaReservaTitleRef.current?.focus(); }}
-                >
-                  <DialogHeader className="px-6 py-4 border-b">
-                    <DialogTitle ref={novaReservaTitleRef} tabIndex={-1} className="text-xl font-semibold">
-                       {editPvId ? '✏️ Editar Reserva' : '📦 Nova Reserva'}
-                    </DialogTitle>
-                    <DialogDescription className="text-sm text-muted-foreground">
-                       {editPvId ? 'Altere os dados da reserva abaixo.' : 'Preencha os dados abaixo para criar uma reserva.'}
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  <div className="flex-1 overflow-y-auto px-6 py-4">
-                        <form id="nova-reserva-form" onSubmit={handlePreVenda} className="space-y-4">
-                            {clientes.length === 0 ? (
-                            <p className="text-muted-foreground text-center py-4">⚠️ Cadastre clientes primeiro</p>
-                            ) : (
-                            <>
-                                <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-semibold">Cliente</label>
-                                <ClienteCombobox 
-                                  value={pvCliente} 
-                                  onChange={setPvCliente}
-                                  open={comboboxOpen}
-                                  onOpenChange={setComboboxOpen}
-                                />
-                                </div>
-
-                                <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <label className="text-sm font-semibold">Itens do Pedido</label>
-                                    <button type="button" onClick={handleAddItem} className="text-xs text-primary font-bold flex items-center gap-1 bg-primary/10 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors">
-                                        <Plus className="h-3 w-3" /> Adicionar
-                                    </button>
-                                </div>
-                                
-                                {pvItens.map((item, index) => (
-                                    <PedidoItemRow
-                                        key={item.id}
-                                        item={item}
-                                        onUpdate={handleUpdateItem}
-                                        onRemove={() => handleRemoveItem(item.id)}
-                                        canRemove={pvItens.length > 1}
-                                    />
-                                ))}
-                                </div>
-                            </>
-                            )}
-                        </form>
-                  </div>
-
-                  <div className="p-4 border-t bg-background mt-auto sticky bottom-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-                        <div className="bg-accent/50 rounded-xl p-3 mb-3 flex justify-between items-center">
-                            <span className="text-sm font-medium text-muted-foreground">Total a Pagar</span>
-                            <span className="text-2xl font-bold text-primary">{fmt(valorTotalPV)}</span>
-                        </div>
-
-                        <div className="flex gap-3">
-                            <button type="button" onClick={closePvForm} className="btn-secondary flex-1 h-12 rounded-xl font-semibold text-base" disabled={isSubmittingPv}>
-                                Cancelar
-                            </button>
-                            <button 
-                                type="submit" 
-                                form="nova-reserva-form" 
-                                className="btn-primary flex-1 h-12 rounded-xl font-bold text-base shadow-md active:scale-95 transition-all" 
-                                disabled={isSubmittingPv}
-                            >
-                                {isSubmittingPv ? <span className="animate-spin mr-2">⏳</span> : null}
-                                {isSubmittingPv ? 'Salvando...' : 'Confirmar'}
-                            </button>
-                        </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            );
-          })()}
+          {/* Nova Reserva Modal */}
+          <NovaReservaModal 
+            open={showNovaReservaModal} 
+            onOpenChange={setShowNovaReservaModal}
+            editId={editingOrder?.id}
+            initialData={editingOrder}
+            onSuccess={() => {
+                setShowNovaReservaModal(false);
+                setEditingOrder(null);
+            }}
+          />
 
           {/* LISTA DE RESERVAS */}
-          {reservados.length === 0 ? (
+          {reservados.length > 0 ? (
+            <div className="space-y-8">
+              {groupedReservados.map((group) => (
+                <div key={group.date} className="card-elevated overflow-hidden bg-white shadow-sm rounded-xl border border-border/50">
+                    <button 
+                        className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+                        onClick={() => toggleDay(group.date)}
+                    >
+                        <div className="flex items-center gap-3">
+                            <h3 className="text-lg font-bold text-foreground/80 capitalize">
+                                {formatDateHeader(group.date)}
+                            </h3>
+                            <span className="text-xs font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                                {group.orders.length}
+                            </span>
+                        </div>
+                        <span className="text-xl text-muted-foreground mr-2 transform transition-transform duration-200">
+                             {collapsedDays.has(group.date) ? '▸' : '▾'}
+                        </span>
+                    </button>
+
+                    {!collapsedDays.has(group.date) && (
+                    <div className="p-4 pt-0 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {group.orders.map((p) => {
+                        const isPaidNotDelivered = p.status === 'pago' && !p.data_entrega;
+                        const canBeDelivered = !p.data_entrega;
+                        
+                        let displayItems = p.itens || [];
+                        if (displayItems.length === 0 && p.produto_id) {
+                            displayItems = [{
+                                id: 'legacy',
+                                produto_id: p.produto_id,
+                                produto_nome: getProdutoNome(p.produto_id),
+                                quantidade: p.quantidade || 1,
+                                preco_unitario: p.valor_unitario || 0,
+                                subtotal: p.valor_total,
+                                paidAt: null,
+                                deliveredAt: null
+                            }];
+                        }
+
+                        return (
+                        <div key={p.id} className={`bg-white rounded-3xl p-5 shadow-sm border hover:shadow-md transition-shadow relative overflow-hidden group ${
+                            isPaidNotDelivered ? 'border-orange-400 ring-1 ring-orange-400 bg-orange-50/30' : 'border-border/40'
+                        }`}>
+                            {isPaidNotDelivered && (
+                                <div className="absolute top-0 right-0 bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-bl-lg z-10">
+                                    PAGO / NÃO ENTREGUE
+                                </div>
+                            )}
+                            {/* Header: Cliente e Valor */}
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                        <span className="text-xs font-bold">👤</span>
+                                    </div>
+                                    <p className="font-bold text-lg text-foreground/90">{getClienteNome(p.cliente_id)}</p>
+                                </div>
+                                <span className="text-xl font-bold text-primary tracking-tight">
+                                    {fmt(p.valor_total)}
+                                </span>
+                            </div>
+
+                            {/* Lista de Itens */}
+                            <div className="space-y-2 mb-4 bg-muted/30 p-2 rounded-2xl">
+                                {displayItems.map((item, idx) => {
+                                    const itemPaid = !!item.paidAt;
+                                    const itemDelivered = !!item.deliveredAt;
+
+                                    return (
+                                        <div key={idx} className="bg-white p-2.5 rounded-xl border border-border/40 flex items-center justify-between shadow-sm">
+                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                <p className="font-medium text-sm truncate max-w-[120px]">{item.produto_nome}</p>
+                                                <span className="text-xs font-semibold px-2 py-0.5 bg-muted text-muted-foreground rounded-md flex-shrink-0">
+                                                    {item.quantidade}x
+                                                </span>
+                                                {itemPaid ? (
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 bg-success/10 text-success rounded flex-shrink-0">
+                                                        Pago
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded flex-shrink-0">
+                                                        A Pagar
+                                                    </span>
+                                                )}
+                                            </div>
+                                            
+                                            {!itemDelivered && (
+                                                <button 
+                                                    onClick={() => entregarItem(p.id, item.id)}
+                                                    className="ml-2 text-xs font-medium px-2 py-1 rounded-lg border border-border hover:bg-muted transition-colors flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <CheckCircle className="h-3 w-3" /> Entregar
+                                                </button>
+                                            )}
+                                            {itemDelivered && (
+                                                <span className="ml-2 text-[10px] font-bold text-primary/70 flex items-center gap-1">
+                                                    <CheckCircle className="h-3 w-3" /> Ok
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Entregar Todos Button */}
+                            {canBeDelivered && (
+                                <button 
+                                    onClick={() => entregarPreVenda(p.id)}
+                                    className="w-full bg-success hover:bg-success/90 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-success/20 active:scale-[0.98] transition-all mb-4 flex items-center justify-center gap-2"
+                                >
+                                    Entregar Todos
+                                </button>
+                            )}
+
+                            {/* Footer Info & Actions */}
+                            <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                                {/* Left: Status & Date */}
+                                <div className="flex items-center gap-3">
+                                    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+                                        p.status === 'pago' ? 'bg-success/15 text-success' : 
+                                        p.status === 'entregue' ? 'bg-primary/10 text-primary' : 
+                                        'bg-yellow-100 text-yellow-800'
+                                    }`}>
+                                        {p.status === 'pago' ? <CheckCircle className="h-3 w-3" /> : <span className="text-xs">⏳</span>}
+                                        {p.status === 'pago' ? 'Concluído' : p.status === 'entregue' ? 'Entregue' : 'Pendente'}
+                                    </div>
+                                    <div className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                                        {/* Show scheduled date if exists, else created date */}
+                                        <span className="text-[10px]">📅</span> {p.scheduledDate ? formatDateHeader(p.scheduledDate) : p.data_pedido}
+                                    </div>
+                                </div>
+
+                                {/* Right: Actions */}
+                                <div className="flex items-center gap-3">
+                                    {p.status !== 'pago' && (
+                                        <button 
+                                            onClick={() => handleEditPreVenda(p)} 
+                                            className="text-sm font-medium text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors"
+                                        >
+                                            <Pencil className="h-3 w-3" /> Editar
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={() => setDeleteState({ id: p.id, type: 'prevenda', nome: 'Reserva' })} 
+                                        className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors"
+                                    >
+                                        Excluir
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        );
+                    })}
+                    </div>
+                    </div>
+                    )} {/* End collapsed check */}
+                </div>
+              ))}
+            </div>
+          ) : (
             <EmptyState
               icon={ShoppingCart}
               title={busca ? 'Nenhuma reserva encontrada' : 'Nenhuma reserva'}
               description={busca ? 'Tente buscar por outro cliente.' : 'Crie uma nova reserva para começar.'}
             />
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {reservados.map((p) => {
-                const isPaidNotDelivered = p.status === 'pago' && !p.data_entrega;
-                const canBeDelivered = !p.data_entrega;
-                
-                let displayItems = p.itens || [];
-                if (displayItems.length === 0 && p.produto_id) {
-                     displayItems = [{
-                         id: 'legacy',
-                         produto_id: p.produto_id,
-                         produto_nome: getProdutoNome(p.produto_id),
-                         quantidade: p.quantidade || 1,
-                         preco_unitario: p.valor_unitario || 0,
-                         subtotal: p.valor_total
-                     }];
-                }
-
-                return (
-                  <div key={p.id} className="bg-white rounded-3xl p-5 shadow-sm border border-border/40 hover:shadow-md transition-shadow relative overflow-hidden group">
-                    {/* Header: Cliente e Valor */}
-                    <div className="flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-2">
-                             <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
-                                <span className="text-xs font-bold">👤</span>
-                             </div>
-                             <p className="font-bold text-lg text-foreground/90">{getClienteNome(p.cliente_id)}</p>
-                        </div>
-                        <span className="text-xl font-bold text-primary tracking-tight">
-                            {fmt(p.valor_total)}
-                        </span>
-                    </div>
-
-                    {/* Lista de Itens */}
-                    <div className="space-y-2 mb-4 bg-muted/30 p-2 rounded-2xl">
-                         {displayItems.map((item, idx) => {
-                             const itemPaid = !!item.paidAt;
-                             const itemDelivered = !!item.deliveredAt;
-
-                             return (
-                                 <div key={idx} className="bg-white p-2.5 rounded-xl border border-border/40 flex items-center justify-between shadow-sm">
-                                     <div className="flex items-center gap-2 overflow-hidden">
-                                          <p className="font-medium text-sm truncate max-w-[120px]">{item.produto_nome}</p>
-                                          <span className="text-xs font-semibold px-2 py-0.5 bg-muted text-muted-foreground rounded-md flex-shrink-0">
-                                              {item.quantidade}x
-                                          </span>
-                                          {itemPaid ? (
-                                              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-success/10 text-success rounded flex-shrink-0">
-                                                  Pago
-                                              </span>
-                                          ) : (
-                                              <span className="text-[10px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded flex-shrink-0">
-                                                  A Pagar
-                                              </span>
-                                          )}
-                                     </div>
-                                     
-                                     {!itemDelivered && (
-                                         <button 
-                                            onClick={() => entregarItem(p.id, item.id)}
-                                            className="ml-2 text-xs font-medium px-2 py-1 rounded-lg border border-border hover:bg-muted transition-colors flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                                         >
-                                            <CheckCircle className="h-3 w-3" /> Entregar
-                                         </button>
-                                     )}
-                                     {itemDelivered && (
-                                         <span className="ml-2 text-[10px] font-bold text-primary/70 flex items-center gap-1">
-                                             <CheckCircle className="h-3 w-3" /> Ok
-                                         </span>
-                                     )}
-                                 </div>
-                             );
-                         })}
-                    </div>
-
-                    {/* Entregar Todos Button */}
-                    {canBeDelivered && (
-                        <button 
-                            onClick={() => entregarPreVenda(p.id)}
-                            className="w-full bg-success hover:bg-success/90 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-success/20 active:scale-[0.98] transition-all mb-4 flex items-center justify-center gap-2"
-                        >
-                            Entregar Todos
-                        </button>
-                    )}
-
-                    {/* Footer Info & Actions */}
-                    <div className="flex items-center justify-between pt-2 border-t border-border/40">
-                        {/* Left: Status & Date */}
-                        <div className="flex items-center gap-3">
-                             <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
-                                 p.status === 'pago' ? 'bg-success/15 text-success' : 
-                                 p.status === 'entregue' ? 'bg-primary/10 text-primary' : 
-                                 'bg-yellow-100 text-yellow-800'
-                             }`}>
-                                 {p.status === 'pago' ? <CheckCircle className="h-3 w-3" /> : <span className="text-xs">⏳</span>}
-                                 {p.status === 'pago' ? 'Concluído' : p.status === 'entregue' ? 'Entregue' : 'Pendente'}
-                             </div>
-                             <div className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
-                                 <span className="text-[10px]">📅</span> {p.data_pedido}
-                             </div>
-                        </div>
-
-                        {/* Right: Actions */}
-                        <div className="flex items-center gap-3">
-                            {/* Checkbox-like Edit (Visual only based on request, or actual edit check?) 
-                                The image shows a checkbox "Editar". It might mean "Select to edit" or just "Edit Mode".
-                                Given functionality, buttons are safer. I'll use text buttons as per implementation plan.
-                            */}
-                             {p.status !== 'pago' && (
-                                 <button 
-                                    onClick={() => handleEditPreVenda(p)} 
-                                    className="text-sm font-medium text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors"
-                                 >
-                                    <Pencil className="h-3 w-3" /> Editar
-                                 </button>
-                             )}
-                             <button 
-                                onClick={() => setDeleteState({ id: p.id, type: 'prevenda', nome: 'Reserva' })} 
-                                className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors"
-                             >
-                                Excluir
-                             </button>
-                        </div>
-                    </div>
-
-                  </div>
-                );
-              })}
-            </div>
           )}
         </div>
       )}

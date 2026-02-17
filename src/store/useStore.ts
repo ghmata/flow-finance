@@ -49,7 +49,7 @@ interface AppState {
   deleteProduto: (id: string) => Promise<boolean>;
 
   // Pré-venda
-  addPreVenda: (cliente_id: string, itens: PedidoItem[]) => Promise<boolean>;
+  addPreVenda: (cliente_id: string, itens: PedidoItem[], scheduledDate?: string) => Promise<boolean>;
   updatePreVenda: (id: string, data: Partial<PedidoPreVenda>) => Promise<boolean>;
   entregarPreVenda: (id: string) => Promise<boolean>;
   entregarItem: (pedido_id: string, item_id: string) => Promise<boolean>; // Granular delivery
@@ -253,8 +253,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  addPreVenda: async (cliente_id, itens) => {
-    console.log('[addPreVenda] Iniciando...', { cliente_id, itensCount: itens.length });
+  addPreVenda: async (cliente_id, itens, scheduledDate) => {
+    console.log('[addPreVenda] Iniciando...', { cliente_id, itensCount: itens.length, scheduledDate });
     try {
       const id = uid();
       const valor_total = itens.reduce((acc, item) => acc + item.subtotal, 0);
@@ -270,8 +270,10 @@ export const useStore = create<AppState>((set, get) => ({
         cliente_id, 
         itens: finalItens,
         valor_total, 
-        status: 'pendente',
+        status: scheduledDate ? 'agendado' : 'pendente',
         data_pedido: today(),
+        scheduledDate: scheduledDate, // Use correct field
+        // data_entrega: undefined, // Keep undefined until delivered
       };
 
       const res = await dbAdd('pedidosPreVenda', newPedido);
@@ -610,6 +612,7 @@ export const useStore = create<AppState>((set, get) => ({
         origem: 'pagamento',
         referencia_pagamento_id: pagamento_id,
         forma_recebimento: forma_pagamento,
+        created_at: new Date().toISOString(), // TIMESTAMP
     };
 
     // 1. Update Parent
@@ -640,7 +643,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   addDespesa: async (data) => {
-    const newDespesa: Despesa = { ...data, id: uid() };
+    const newDespesa: Despesa = { ...data, id: uid(), created_at: new Date().toISOString() };
     const res = await dbAdd('despesas', newDespesa);
     if (res.success) {
       set((s) => ({ despesas: [...s.despesas, newDespesa] }));
@@ -670,7 +673,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   addReceitaManual: async (data) => {
-    const newReceita: Receita = { ...data, id: uid(), origem: 'manual' };
+    const newReceita: Receita = { ...data, id: uid(), origem: 'manual', created_at: new Date().toISOString() };
     const res = await dbAdd('receitas', newReceita);
     if (res.success) {
         set((s) => ({ receitas: [...s.receitas, newReceita] }));
@@ -684,7 +687,7 @@ export const useStore = create<AppState>((set, get) => ({
     const map = new Map<string, DevedorAgrupado>();
 
     state.pedidosPreVenda
-      .filter((p) => p.status === 'pendente' || p.status === 'entregue' || p.status === 'parcial')
+      .filter((p) => p.status === 'pendente' || p.status === 'entregue' || p.status === 'parcial' || p.status === 'agendado')
       .forEach((p) => {
         const cliente = state.clientes.find((c) => c.id === p.cliente_id);
         if (!cliente) return;

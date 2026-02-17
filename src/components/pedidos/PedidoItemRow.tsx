@@ -120,7 +120,13 @@ export const PedidoItemRow = ({
       <div className="flex items-center justify-between pt-2 border-t border-border/50">
         <div className="flex flex-col">
             <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Subtotal</span>
-            <span className="text-lg font-bold text-primary">R$ {item.subtotal.toFixed(2).replace('.', ',')}</span>
+            <span className="text-lg font-bold text-primary">
+                {/* Fallback calculation if subtotal is 0 but price/qty are set */}
+                {(() => {
+                    const val = item.subtotal || (item.preco_unitario * item.quantidade);
+                    return `R$ ${val.toFixed(2).replace('.', ',')}`;
+                })()}
+            </span>
         </div>
 
         <Button
