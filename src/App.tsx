@@ -45,6 +45,24 @@ const App = () => {
     init();
   }, [initStore]);
 
+  // Guard: re-inicializa o store quando o app volta do background
+  // Previne o erro NotFound causado por tab discarding do navegador
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        const state = useStore.getState();
+        // Se o store perdeu os dados (navegador descartou a tab), re-inicializa
+        if (state.clientes.length === 0 && !state.isLoading) {
+          console.log("[App] Re-inicializando store após retorno do background...");
+          initStore();
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [initStore]);
+
   if (isInitializing) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">

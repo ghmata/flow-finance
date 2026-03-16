@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '@/store/useStore';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import { Check, ChevronsUpDown, UserPlus } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import {
   Popover,
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/command";
 import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useToast } from "@/hooks/use-toast";
 
 interface ClienteComboboxProps {
   value: string;
@@ -32,9 +33,12 @@ export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenCha
   const setOpen = externalOnOpenChange || setInternalOpen;
   
   const [inputValue, setInputValue] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
   const clientes = useStore((state) => state.clientes);
+  const addCliente = useStore((state) => state.addCliente);
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
+  const { toast } = useToast();
 
   const selectedCliente = clientes.find((c) => c.id === value);
 
@@ -57,6 +61,53 @@ export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenCha
       setOpen(false);
   };
 
+  const handleCreateCliente = async () => {
+    const nome = inputValue.trim();
+    if (!nome || isCreating) return;
+
+    setIsCreating(true);
+    try {
+      const success = await addCliente(nome);
+      if (success) {
+        // Buscar o cliente recém-criado no store atualizado
+        const state = useStore.getState();
+        const novoCliente = state.clientes.find(c => c.nome === nome);
+        if (novoCliente) {
+          onChange(novoCliente.id);
+          setInputValue(novoCliente.nome);
+        }
+        setOpen(false);
+        toast({
+          title: "Cliente criado!",
+          description: `"${nome}" adicionado com sucesso.`,
+        });
+      } else {
+        toast({
+          title: "Erro ao criar cliente",
+          description: "Tente novamente.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  // Verifica se o termo buscado já não é um cliente existente (para não exibir botão desnecessário)
+  const showCreateButton = inputValue.trim().length > 0 && filteredClientes.length === 0;
+
+  const CreateClienteButton = () => (
+    <button
+      type="button"
+      onClick={handleCreateCliente}
+      disabled={isCreating}
+      className="flex items-center gap-2 w-full px-2 py-2.5 text-sm text-primary hover:bg-accent rounded-sm cursor-pointer transition-colors disabled:opacity-50"
+    >
+      <UserPlus className="h-4 w-4" />
+      <span>{isCreating ? 'Criando...' : `Criar "${inputValue.trim()}"`}</span>
+    </button>
+  );
+
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
@@ -73,14 +124,16 @@ export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenCha
         </DrawerTrigger>
         <DrawerContent>
           <div className="mt-4 border-t">
-            <Command>
+            <Command shouldFilter={false}>
               <CommandInput 
                 placeholder="Buscar cliente..." 
                 value={inputValue}
                 onValueChange={setInputValue}
               />
               <CommandList>
-                <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+                {filteredClientes.length === 0 && !showCreateButton && (
+                  <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+                )}
                 <CommandGroup>
                   {filteredClientes.map((c) => (
                     <CommandItem
@@ -99,6 +152,11 @@ export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenCha
                   ))}
                 </CommandGroup>
               </CommandList>
+              {showCreateButton && (
+                <div className="border-t p-1">
+                  <CreateClienteButton />
+                </div>
+              )}
             </Command>
           </div>
         </DrawerContent>
@@ -132,9 +190,11 @@ export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenCha
         align="start"
         onOpenAutoFocus={(e) => e.preventDefault()} 
       >
-        <Command>
+        <Command shouldFilter={false}>
           <CommandList>
-            <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+            {filteredClientes.length === 0 && !showCreateButton && (
+              <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+            )}
             <CommandGroup>
               {filteredClientes.map((c) => (
                 <CommandItem
@@ -153,6 +213,11 @@ export const ClienteCombobox = ({ value, onChange, open: externalOpen, onOpenCha
               ))}
             </CommandGroup>
           </CommandList>
+          {showCreateButton && (
+            <div className="border-t p-1">
+              <CreateClienteButton />
+            </div>
+          )}
         </Command>
       </PopoverContent>
     </Popover>

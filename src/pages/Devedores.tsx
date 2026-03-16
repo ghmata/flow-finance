@@ -2,8 +2,11 @@ import { useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import PagamentoModal from '@/components/PagamentoModal';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PartyPopper, PackageCheck, CheckCircle, ChevronDown, ChevronUp, CircleDollarSign } from 'lucide-react';
+import { PartyPopper, PackageCheck, CheckCircle, ChevronDown, ChevronUp, CircleDollarSign, Copy, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import { parseISO, isToday, isTomorrow, isYesterday, isValid, format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 type AbaReceber = 'areceber' | 'pagos';
 
@@ -14,6 +17,7 @@ const Devedores = () => {
 
   const [aba, setAba] = useState<AbaReceber>('areceber');
   const [busca, setBusca] = useState('');
+  const { toast } = useToast();
 
   // Payment Modal State
   const [pagModal, setPagModal] = useState<{
@@ -69,15 +73,93 @@ const Devedores = () => {
       });
   };
 
-
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
-
+  const handleCopyChargeMessage = async (clienteNome: string, valor: number) => {
+    const defaultTemplate = `Estimado cliente [CLIENTE], boa tarde!\n\nA equipe da Theus Doces agradece imensamente pela sua parceria. Gostaríamos de lembrá-lo, de forma gentil, sobre o pagamento de [VALOR] referente aos doces.\n\nSegue a chave Pix para sua comodidade: 31920067388.`;
+    
+    // Na correção futura pode buscar das config do dexie, mas por agora fixo:
+    const finalMessage = defaultTemplate
+        .replace('[CLIENTE]', clienteNome.split(' ')[0]) // Usa o primeiro nome ou passa clienteNome inteiro. Depende da UI, deixar inteiro é seguro.
+        .replace('[VALOR]', fmt(valor));
+    
+    try {
+        await navigator.clipboard.writeText(finalMessage);
+        toast({
+            title: "Mensagem copiada!",
+            description: "Texto pronto para colar no WhatsApp.",
+            variant: "default",
+        })
+    } catch(err) {
+        console.error("Falha ao copiar: ", err);
+         toast({
+            title: "Erro ao copiar",
+            description: "Não foi possível copiar o texto para a área de transferência.",
+            variant: "destructive",
+        })
+    }
+  }
 
   // Filter devedores
   const filteredDevedores = devedores.filter((d) =>
     d.cliente.nome.toLowerCase().includes(busca.toLowerCase())
   );
+
+  // Group devedores by the earliest item date (Correção 3)
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+
+  const toggleDate = (dateKey: string) => {
+    setCollapsedDates(prev => {
+      const next = new Set(prev);
+      if (next.has(dateKey)) next.delete(dateKey);
+      else next.add(dateKey);
+      return next;
+    });
+  };
+
+  const groupedByDate = useMemo(() => {
+    const groups: Record<string, typeof filteredDevedores> = {};
+
+    filteredDevedores.forEach(dev => {
+      // Pegar a data mais antiga dos itens do devedor
+      const earliestDate = dev.itens.reduce((oldest, item) => {
+        if (!item.data) return oldest;
+        if (!oldest) return item.data;
+        return item.data < oldest ? item.data : oldest;
+      }, '' as string);
+      const dateKey = earliestDate || 'sem_data';
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(dev);
+    });
+
+    // Ordenar: datas mais recentes primeiro, sem_data no final
+    const keys = Object.keys(groups).sort((a, b) => {
+      if (a === 'sem_data') return 1;
+      if (b === 'sem_data') return -1;
+      return b.localeCompare(a); // Mais recente primeiro
+    });
+
+    return keys.map(key => ({
+      dateKey: key,
+      devedores: groups[key],
+      total: groups[key].reduce((sum, d) => sum + d.total, 0),
+    }));
+  }, [filteredDevedores]);
+
+  const formatDateHeader = (dateStr: string) => {
+    if (dateStr === 'sem_data') return '📅 Sem Data';
+    try {
+      const date = parseISO(dateStr);
+      if (!isValid(date)) return 'Data Inválida';
+      let prefix = '';
+      if (isToday(date)) prefix = 'Hoje, ';
+      else if (isTomorrow(date)) prefix = 'Amanhã, ';
+      else if (isYesterday(date)) prefix = 'Ontem, ';
+      return `${prefix}${format(date, "EEEE, dd 'de' MMMM", { locale: ptBR })}`;
+    } catch {
+      return dateStr;
+    }
+  };
 
   // Group Pagos/Não Entregues by Client like Devedores
   const groupedPagosNE = useMemo(() => {
@@ -162,53 +244,12 @@ const Devedores = () => {
     g.cliente.nome.toLowerCase().includes(busca.toLowerCase())
   );
   
-
   const totalPagosNE = groupedPagosNE.reduce((acc, g) => acc + g.total, 0);
 
   const abas = [
     { key: 'areceber' as const, label: '💰 A Receber' },
     { key: 'pagos' as const, label: '✅ Pagos/Não Entregues' },
   ];
-
-  const handleBatchPayment = (dev: any) => {
-      // Find all unpaid items for this client from the current view
-      // The devedores list (filteredDevedores) already contains only unpaid items usually?
-      // getDevedores return items. If we want to verify, we check item.paidAt
-      const unpaidItems = dev.itens.filter((i: any) => !i.paidAt);
-      const itemIds = unpaidItems.map((i: any) => i.itemId || i.id);
-      
-      // We need to support batch payment across different orders/reservations?
-      // Our store function `registrarPagamentoEmLote` takes `referencia_id` (parent ID).
-      // If a client has multiple orders, we can't do it in ONE store call if the store ref expects a single parent.
-      // Store: `registrarPagamentoEmLote(tipo, referencia_id, itens_ids, ...)`
-      // This implies it only works for a single Reference (Order).
-      
-      // If the client has multiple orders, we need to call it multiple times or refactor store to handle multiple parents.
-      // For now, let's implement "Receber Tudo" as: "Receber tudo DESTE Pedido" if we group by order.
-      // BUT, the UI groups by CLIENT.
-      
-      // If we want to pay EVERYTHING for the client, we have to iterate their orders.
-      // This might be complex for the modal which expects a single ref.
-      
-      // Compromise: The "Receber Pagamento" button on the card (Client) will just open a confirmation
-      // and then we loop through orders.
-      // Wait, `pagModal` is designed for a single payment logic in UI probably (based on existing component).
-      
-      // Let's customize `PagamentoModal` or generic confirmation?
-      // Actually, let's look at `PagamentoModal`. It calls `registrarPagamento`.
-      
-      // Use existing modal reused for batch?
-      // We'll pass a special `onConfirm` callback to it if we want custom logic.
-      // But `PagamentoModal` is coupled to `useStore` inside it.
-      // We need to refactor `PagamentoModal` or just call store directly after our own confirmation.
-      
-      // Let's stick to granular "Receber Item" for now as priority.
-      // And for "Receber Tudo", maybe we iterate? 
-      // Or we just don't offer "Receber Tudo" across multiple orders yet to avoid complexity?
-      // The user PLAN said: "Receber tudo de um pedido".
-      
-      // Let's implement Granular Item Payment first.
-  };
 
   return (
     <div className="page-container">
@@ -250,92 +291,127 @@ const Devedores = () => {
               description="Todos os pagamentos estão em dia."
             />
           ) : (
-            <div className="space-y-4">
-              {filteredDevedores.map((dev) => (
-                <div key={dev.cliente.id} className="card-elevated overflow-hidden">
-                  <div className="gradient-primary p-4 text-primary-foreground flex items-center justify-between cursor-pointer" onClick={() => toggleClient(dev.cliente.id)}>
-                    <div className="flex items-center gap-3">
-                      <div className="bg-primary-foreground/20 rounded-full p-2.5">
-                        <span className="text-2xl">👤</span>
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold">{dev.cliente.nome}</h3>
-                        {dev.cliente.telefone && (
-                          <p className="text-sm opacity-90">📱 {dev.cliente.telefone}</p>
-                        )}
-                      </div>
+            <div className="space-y-6">
+              {groupedByDate.map((group) => (
+                <div key={group.dateKey}>
+                  {/* Date Header */}
+                  <button
+                    onClick={() => toggleDate(group.dateKey)}
+                    className="flex items-center justify-between w-full mb-3 px-1 group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-primary" />
+                      <h2 className="text-sm font-bold text-foreground capitalize">
+                        {formatDateHeader(group.dateKey)}
+                      </h2>
+                      <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        {group.devedores.length} cliente(s) • {fmt(group.total)}
+                      </span>
                     </div>
-                    <div className="text-right flex items-center gap-2">
-                       <div>
-                          <p className="text-xs opacity-80">Deve</p>
-                          <p className="text-2xl font-bold">{fmt(dev.total)}</p>
-                       </div>
-                       {expandedClients.includes(dev.cliente.id) ? <ChevronUp /> : <ChevronDown />}
-                    </div>
-                  </div>
+                    {collapsedDates.has(group.dateKey) ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
 
-                  {/* Items List - Always show or only when expanded? Let's show always for visibility vs interaction? 
-                      User asked for grouping. Collapsed by default is cleaner.
-                  */}
-                  {expandedClients.includes(dev.cliente.id) && (
-                  <div className="p-4 space-y-2 bg-muted/10">
-                    {dev.itens.map((item) => (
-                      <div key={`${item.id}-${item.itemId}`} className="flex items-center justify-between bg-white border border-border rounded-xl p-3 shadow-sm">
-                        <div>
-                          <p className="font-semibold">{item.descricao}</p>
-                          <p className="text-xs text-muted-foreground">
-                            📅 há {item.dias} dia(s) • {item.tipo === 'prevenda' ? '📦 Reserva' : '🛒 Pronta Entrega'}
-                          </p>
+                  {/* Devedores dentro da data */}
+                  {!collapsedDates.has(group.dateKey) && (
+                    <div className="space-y-4">
+                      {group.devedores.map((dev) => (
+                        <div key={dev.cliente.id} className="card-elevated overflow-hidden">
+                          <div className="gradient-primary p-4 text-primary-foreground flex items-center justify-between cursor-pointer" onClick={() => toggleClient(dev.cliente.id)}>
+                            <div className="flex items-center gap-3">
+                              <div className="bg-primary-foreground/20 rounded-full p-2.5">
+                                <span className="text-2xl">👤</span>
+                              </div>
+                              <div>
+                                <h3 className="text-xl font-bold">{dev.cliente.nome}</h3>
+                                {dev.cliente.telefone && (
+                                  <p className="text-sm opacity-90">📱 {dev.cliente.telefone}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right flex items-center gap-2">
+                               <div>
+                                  <p className="text-xs opacity-80">Deve</p>
+                                  <p className="text-2xl font-bold">{fmt(dev.total)}</p>
+                               </div>
+                               {expandedClients.includes(dev.cliente.id) ? <ChevronUp /> : <ChevronDown />}
+                            </div>
+                          </div>
+
+                          {expandedClients.includes(dev.cliente.id) && (
+                          <div className="p-4 space-y-2 bg-muted/10">
+                            {dev.itens.map((item) => (
+                              <div key={`${item.id}-${item.itemId}`} className="flex items-center justify-between bg-white border border-border rounded-xl p-3 shadow-sm">
+                                <div>
+                                  <p className="font-semibold">{item.descricao}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    📅 há {item.dias} dia(s) • {item.tipo === 'prevenda' ? '📦 Reserva' : '🛒 Pronta Entrega'}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-lg text-primary">{fmt(item.valor)}</p>
+                                  <button
+                                    onClick={() =>
+                                      setPagModal({
+                                        tipo: item.tipo,
+                                        referenciaId: item.id,
+                                        itemId: item.itemId || item.id,
+                                        clienteNome: dev.cliente.nome,
+                                        valor: item.valor,
+                                      })
+                                    }
+                                    className="text-xs font-semibold mt-1 bg-success/10 text-success px-2 py-1 rounded hover:bg-success/20 transition-colors"
+                                  >
+                                    💵 Pagar Item
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          )}
+                          
+                          {/* Footer Actions */}
+                          <div className="px-4 py-3 bg-muted/30 border-t flex justify-end items-center gap-2">
+                              <button
+                                onClick={() => toggleClient(dev.cliente.id)}
+                                className="text-xs text-muted-foreground underline mr-auto"
+                              >
+                                {expandedClients.includes(dev.cliente.id) ? 'Ocultar itens' : `Ver ${dev.itens.length} itens`}
+                              </button>
+                              
+                              <Button
+                                variant="outline"
+                                onClick={() => handleCopyChargeMessage(dev.cliente.nome, dev.total)}
+                                className="text-muted-foreground border-border px-3 rounded-xl shadow-sm transition-all h-10 hover:bg-muted"
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Cobrar
+                              </Button>
+
+                              <Button
+                                onClick={() => {
+                                    setPagModal({
+                                        tipo: 'prevenda',
+                                        referenciaId: dev.cliente.id,
+                                        itemId: '', 
+                                        clienteNome: dev.cliente.nome,
+                                        valor: dev.total,
+                                        isBatch: true
+                                    });
+                                }}
+                                className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition-all h-10"
+                              >
+                                <CircleDollarSign className="mr-2 h-4 w-4" />
+                                Receber Tudo ({fmt(dev.total)})
+                              </Button>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-lg text-primary">{fmt(item.valor)}</p>
-                          <button
-                            onClick={() =>
-                              setPagModal({
-                                tipo: item.tipo,
-                                referenciaId: item.id,
-                                itemId: item.itemId || item.id,
-                                clienteNome: dev.cliente.nome,
-                                valor: item.valor,
-                              })
-                            }
-                            className="text-xs font-semibold mt-1 bg-success/10 text-success px-2 py-1 rounded hover:bg-success/20 transition-colors"
-                          >
-                            💵 Pagar Item
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
                   )}
-                  
-                  {/* Footer Actions */}
-                  <div className="px-4 py-3 bg-muted/30 border-t flex justify-end">
-                      <button
-                        onClick={() => toggleClient(dev.cliente.id)}
-                        className="text-xs text-muted-foreground underline mr-auto"
-                      >
-                        {expandedClients.includes(dev.cliente.id) ? 'Ocultar itens' : `Ver ${dev.itens.length} itens`}
-                      </button>
-                      
-                      {/* Batch Payment Button */}
-                      <Button
-                        onClick={() => {
-                            setPagModal({
-                                tipo: 'prevenda', // Dummy
-                                referenciaId: dev.cliente.id, // We use this as client ID for batch
-                                itemId: '', 
-                                clienteNome: dev.cliente.nome,
-                                valor: dev.total,
-                                isBatch: true
-                            });
-                        }}
-                        className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition-all ml-2 h-10"
-                      >
-                        <CircleDollarSign className="mr-2 h-4 w-4" />
-                        Receber Tudo ({fmt(dev.total)})
-                      </Button>
-                  </div>
                 </div>
               ))}
             </div>

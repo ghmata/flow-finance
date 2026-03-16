@@ -125,7 +125,7 @@ const Pedidos = () => {
   const reservados = useMemo(() => {
     const filtered = pedidosPreVenda.filter((p) => {
       const matchSearch = getClienteNome(p.cliente_id).toLowerCase().includes(busca.toLowerCase());
-      const isConcluido = p.status === 'pago' && !!p.data_entrega;
+      const isConcluido = (p.status === 'pago' && !!p.data_entrega) || p.status === 'entregue';
       return matchSearch && (showConcluidos || !isConcluido);
     });
     return [...filtered].sort((a, b) => {
