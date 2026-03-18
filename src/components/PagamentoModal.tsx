@@ -38,7 +38,7 @@ const PagamentoModal = ({
 }: PagamentoModalProps) => {
   const [forma, setForma] = useState('PIX');
   const [valorStr, setValorStr] = useState('');
-  const { registrarPagamento, registrarPagamentoReserva } = useStore();
+  const { registrarPagamento, registrarPagamentoEmLote } = useStore();
   const isMobile = useIsMobile();
 
   const contentRef = useRef<HTMLDivElement>(null);
@@ -65,9 +65,9 @@ const PagamentoModal = ({
     
     if (onConfirm) {
         onConfirm(forma, valorFinal);
-    } else if (tipo === 'prevenda' && itemId) {
-        // Granular payment
-        registrarPagamentoReserva(tipo, referenciaId, itemId, forma);
+    } else if (itemId) {
+        // Pagamento granular de item — envia valor editado como valor_pago_custom
+        registrarPagamentoEmLote(tipo, referenciaId, [itemId], forma, valorFinal);
     } else {
        registrarPagamento(tipo, referenciaId, forma);
     }

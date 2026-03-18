@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Search, Eye, EyeOff, ShoppingCart, Plus, Trash2, CheckCircle, Package, Pencil, Truck } from "lucide-react";
+import { Search, Eye, EyeOff, ShoppingCart, Plus, Trash2, CheckCircle, Package, Pencil, Truck, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState } from '@/components/ui/empty-state';
@@ -34,7 +34,7 @@ import { format, parseISO, isToday, isTomorrow, isYesterday, isValid } from 'dat
 import { ptBR } from 'date-fns/locale';
 import { NovaReservaModal } from '@/components/pedidos/NovaReservaModal';
 
-type Tab = 'prevenda' | 'posvenda';
+type Tab = 'prevenda' | 'posvenda' | 'resumo';
 
 const Pedidos = () => {
   const {
@@ -211,9 +211,60 @@ const Pedidos = () => {
     return Math.floor((now.getTime() - d.getTime()) / 86400000) > 10;
   };
 
+  // Resumo de reservas ativas agrupadas por dia e produto
+  const resumoPorDia = useMemo(() => {
+    // Filtrar apenas pedidos ativos (não pagos, não cancelados, não entregues com data_entrega)
+    const pedidosAtivos = pedidosPreVenda.filter(p => {
+      const isConcluido = (p.status === 'pago' && !!p.data_entrega) || p.status === 'entregue' || p.status === 'cancelado';
+      return !isConcluido;
+    });
+
+    // Agrupar por scheduledDate -> produto -> quantidade
+    const dayMap = new Map<string, Map<string, { nome: string; quantidade: number }>>();
+
+    pedidosAtivos.forEach(p => {
+      const dateKey = p.scheduledDate || 'sem_data';
+      if (!dayMap.has(dateKey)) dayMap.set(dateKey, new Map());
+      const prodMap = dayMap.get(dateKey)!;
+
+      const itens = p.itens || [];
+      if (itens.length === 0 && p.produto_id) {
+        // Legacy
+        const nome = getProdutoNome(p.produto_id);
+        const qty = p.quantidade || 1;
+        if (!prodMap.has(p.produto_id)) prodMap.set(p.produto_id, { nome, quantidade: 0 });
+        prodMap.get(p.produto_id)!.quantidade += qty;
+      } else {
+        itens.forEach(item => {
+          // Subtrair itens já entregues
+          if (item.deliveredAt) return;
+          if (!prodMap.has(item.produto_id)) prodMap.set(item.produto_id, { nome: item.produto_nome, quantidade: 0 });
+          prodMap.get(item.produto_id)!.quantidade += item.quantidade;
+        });
+      }
+    });
+
+    // Converter para array ordenada por data
+    const keys = Array.from(dayMap.keys()).sort((a, b) => {
+      if (a === 'sem_data') return 1;
+      if (b === 'sem_data') return -1;
+      return a.localeCompare(b);
+    });
+
+    return keys.map(key => {
+      const prodMap = dayMap.get(key)!;
+      const produtos = Array.from(prodMap.values())
+        .filter(p => p.quantidade > 0)
+        .sort((a, b) => b.quantidade - a.quantidade);
+      const totalUnidades = produtos.reduce((acc, p) => acc + p.quantidade, 0);
+      return { date: key, produtos, totalUnidades };
+    }).filter(g => g.totalUnidades > 0);
+  }, [pedidosPreVenda, getProdutoNome]);
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'prevenda', label: '🔖 Reservados' },
     { key: 'posvenda', label: '🛒 Pronta Entrega' },
+    { key: 'resumo', label: '📊 Resumo' },
   ];
 
   return (
@@ -234,26 +285,19 @@ const Pedidos = () => {
 
       {/* TABS - Segmented Control Style */}
       <div className="flex p-1 mb-6 bg-secondary/50 rounded-2xl">
-        <button
-          onClick={() => setTab('prevenda')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-            tab === 'prevenda' 
-              ? 'bg-white text-primary shadow-sm' 
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <span className="text-lg">📌</span> Reservados
-        </button>
-        <button
-          onClick={() => setTab('posvenda')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-            tab === 'posvenda' 
-              ? 'bg-white text-primary shadow-sm' 
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <ShoppingCart className="h-4 w-4" /> Pronta Entrega
-        </button>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+              tab === t.key
+                ? 'bg-white text-primary shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
 
@@ -535,6 +579,69 @@ const Pedidos = () => {
                             <Trash2 className="h-4 w-4" />
                         </button>
                     </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ABA RESUMO DE RESERVAS */}
+      {tab === 'resumo' && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Header com total geral */}
+          <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-5 text-white">
+            <div className="flex items-center gap-2 mb-1">
+              <BarChart3 className="h-5 w-5 opacity-90" />
+              <p className="text-sm opacity-90 font-medium">Resumo de Reservas Ativas</p>
+            </div>
+            <p className="text-3xl font-bold">
+              {resumoPorDia.reduce((acc, g) => acc + g.totalUnidades, 0)} unidades
+            </p>
+            <p className="text-sm opacity-80 mt-1">
+              em {resumoPorDia.length} dia(s) agendado(s)
+            </p>
+          </div>
+
+          {resumoPorDia.length === 0 ? (
+            <EmptyState
+              icon={Package}
+              title="Nenhuma reserva ativa"
+              description="Quando houver reservas pendentes, o resumo aparecerá aqui agrupado por dia."
+            />
+          ) : (
+            <div className="space-y-4">
+              {resumoPorDia.map((group) => (
+                <div key={group.date} className="bg-white rounded-2xl shadow-sm border border-border/40 overflow-hidden">
+                  {/* Header do dia */}
+                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 border-b border-border/30">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-bold text-foreground/90 capitalize">
+                        📅 {formatDateHeader(group.date)}
+                      </h3>
+                      <span className="text-sm font-bold bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full">
+                        {group.totalUnidades} un.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Lista de produtos */}
+                  <div className="p-3 space-y-2">
+                    {group.produtos.map((prod, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between bg-muted/30 rounded-xl px-4 py-3 border border-border/20"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-lg">
+                            📦
+                          </div>
+                          <p className="font-semibold text-sm text-foreground/90">{prod.nome}</p>
+                        </div>
+                        <span className="text-lg font-bold text-indigo-600">×{prod.quantidade}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
