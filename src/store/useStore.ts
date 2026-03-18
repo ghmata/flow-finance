@@ -79,7 +79,7 @@ interface AppState {
   getClienteNome: (id: string) => string;
   getProdutoNome: (id: string) => string;
   getTop3Compradores: () => { nome: string; total: number; qtd: number }[];
-  getTop3ProdutosMaisReservados: () => { nome: string; quantidade: number }[];
+  getTop3ProdutosMaisVendidos: () => { nome: string; quantidade: number }[];
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -833,50 +833,67 @@ export const useStore = create<AppState>((set, get) => ({
 
   getTop3Compradores: () => {
     const state = get();
-    
-    // Logic: Sum valor_pago from orders/records in current month
     const map = new Map<string, { nome: string; total: number; qtd: number }>();
     
-    // 1. Process Pedidos Pre-Venda
-    state.pedidosPreVenda.forEach(p => {
-        // Must have some payment and be in current month
-        const valorPago = p.valor_pago || 0;
-        if (valorPago <= 0) return;
-        
-        // Use data_pagamento if available, else fallback to data_pedido (legacy)
-        const dateToCheck = p.data_pagamento || p.data_pedido;
-        if (!isInCurrentMonth(dateToCheck)) return;
-        
+    // Fonte primária: tabela pagamentos (valor individual de cada transação com data precisa)
+    state.pagamentos
+      .filter(p => isInCurrentMonth(p.data_pagamento))
+      .forEach(p => {
+        if (p.valor_pago <= 0) return;
         if (!map.has(p.cliente_id)) {
-             const cliente = state.clientes.find(c => c.id === p.cliente_id);
-             if (!cliente) return;
-             map.set(p.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
+          const cliente = state.clientes.find(c => c.id === p.cliente_id);
+          if (!cliente) return;
+          map.set(p.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
         }
         const entry = map.get(p.cliente_id)!;
-        entry.total += valorPago;
+        entry.total += p.valor_pago;
         entry.qtd += 1;
+      });
+    
+    // Fallback legacy: pedidos/registros com status 'pago' mas sem registro na tabela pagamentos
+    // (dados anteriores à refatoração)
+    const clientesJaContados = new Set(map.keys());
+    
+    state.pedidosPreVenda.forEach(p => {
+      if (p.status !== 'pago') return;
+      if (clientesJaContados.has(p.cliente_id)) return; // Já contabilizado via pagamentos
+      
+      let valorPago = p.valor_pago || 0;
+      if (valorPago <= 0) valorPago = p.valor_total; // Fallback C2
+      if (valorPago <= 0) return;
+      
+      const dateToCheck = p.data_pagamento || p.data_pedido;
+      if (!isInCurrentMonth(dateToCheck)) return;
+      
+      if (!map.has(p.cliente_id)) {
+        const cliente = state.clientes.find(c => c.id === p.cliente_id);
+        if (!cliente) return;
+        map.set(p.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
+      }
+      const entry = map.get(p.cliente_id)!;
+      entry.total += valorPago;
+      entry.qtd += 1;
     });
 
-    // 2. Process Registros Pos-Venda
     state.registrosPosVenda.forEach(r => {
-        // PosVenda usually paid on spot, so valor_pago should be total if 'pago', or partial
-        // Fallback: if status is 'pago' and valor_pago undefined, use valor_total (legacy)
-        let valorPago = r.valor_pago || 0;
-        if (r.status === 'pago' && valorPago === 0) valorPago = r.valor_total;
-        
-        if (valorPago <= 0) return;
-
-        const dateToCheck = r.data_pagamento || r.data_registro;
-        if (!isInCurrentMonth(dateToCheck)) return;
-
-        if (!map.has(r.cliente_id)) {
-             const cliente = state.clientes.find(c => c.id === r.cliente_id);
-             if (!cliente) return;
-             map.set(r.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
-        }
-        const entry = map.get(r.cliente_id)!;
-        entry.total += valorPago;
-        entry.qtd += 1;
+      if (r.status !== 'pago') return;
+      if (clientesJaContados.has(r.cliente_id)) return;
+      
+      let valorPago = r.valor_pago || 0;
+      if (valorPago <= 0) valorPago = r.valor_total;
+      if (valorPago <= 0) return;
+      
+      const dateToCheck = r.data_pagamento || r.data_registro;
+      if (!isInCurrentMonth(dateToCheck)) return;
+      
+      if (!map.has(r.cliente_id)) {
+        const cliente = state.clientes.find(c => c.id === r.cliente_id);
+        if (!cliente) return;
+        map.set(r.cliente_id, { nome: cliente.nome, total: 0, qtd: 0 });
+      }
+      const entry = map.get(r.cliente_id)!;
+      entry.total += valorPago;
+      entry.qtd += 1;
     });
     
     return Array.from(map.values())
@@ -884,36 +901,51 @@ export const useStore = create<AppState>((set, get) => ({
       .slice(0, 3);
   },
 
-  getTop3ProdutosMaisReservados: () => {
+  getTop3ProdutosMaisVendidos: () => {
     const state = get();
-    // Only PedidosPreVenda have products
-    const pedidosDoMes = state.pedidosPreVenda.filter(p => isInCurrentMonth(p.data_pedido));
-    
     const map = new Map<string, { nome: string; quantidade: number }>();
     
-    pedidosDoMes.forEach(p => {
-       // Iterate over items if available (migration compatible)
-       const itens = p.itens || [];
-       // Fallback for migrated data if itens is empty but legacy fields exist (though migration should have fixed this)
-       if (itens.length === 0 && p.produto_id) {
-           const produto = state.produtos.find(pr => pr.id === p.produto_id);
-           if (produto) {
-                if (!map.has(p.produto_id)) {
-                    map.set(p.produto_id, { nome: produto.nome_sabor, quantidade: 0 });
-                }
-                const entry = map.get(p.produto_id)!;
-                entry.quantidade += p.quantidade;
-           }
-       } else {
-           itens.forEach(item => {
-               if (!map.has(item.produto_id)) {
-                 map.set(item.produto_id, { nome: item.produto_nome || 'Produto', quantidade: 0 });
-               }
-               const entry = map.get(item.produto_id)!;
-               entry.quantidade += item.quantidade;
-           });
-       }
-    });
+    // Helper para processar itens de um pedido/registro
+    const processItens = (itens: PedidoItem[], legacyProdutoId?: string, legacyQtd?: number) => {
+      if (itens.length === 0 && legacyProdutoId) {
+        // Fallback legacy
+        const produto = state.produtos.find(pr => pr.id === legacyProdutoId);
+        if (produto) {
+          if (!map.has(legacyProdutoId)) {
+            map.set(legacyProdutoId, { nome: produto.nome_sabor, quantidade: 0 });
+          }
+          map.get(legacyProdutoId)!.quantidade += (legacyQtd || 1);
+        }
+      } else {
+        itens.forEach(item => {
+          // Ignorar itens manuais de pós-venda sem produto real
+          if (item.produto_id === 'pos-venda-manual') {
+            const key = `manual-${item.produto_nome}`;
+            if (!map.has(key)) map.set(key, { nome: item.produto_nome || 'Venda Avulsa', quantidade: 0 });
+            map.get(key)!.quantidade += item.quantidade;
+          } else {
+            if (!map.has(item.produto_id)) {
+              map.set(item.produto_id, { nome: item.produto_nome || 'Produto', quantidade: 0 });
+            }
+            map.get(item.produto_id)!.quantidade += item.quantidade;
+          }
+        });
+      }
+    };
+    
+    // 1. Pré-Venda: filtrar mês atual, excluir cancelados, apenas pago/entregue
+    state.pedidosPreVenda
+      .filter(p => 
+        isInCurrentMonth(p.data_pedido) && 
+        p.status !== 'cancelado' &&
+        (p.status === 'pago' || p.status === 'entregue' || p.status === 'parcial')
+      )
+      .forEach(p => processItens(p.itens || [], p.produto_id, p.quantidade));
+    
+    // 2. Pós-Venda: incluir registros do mês atual
+    state.registrosPosVenda
+      .filter(r => isInCurrentMonth(r.data_registro))
+      .forEach(r => processItens(r.itens || []));
     
     return Array.from(map.values())
       .sort((a, b) => b.quantidade - a.quantidade)

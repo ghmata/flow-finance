@@ -9,10 +9,12 @@ const COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
 const Dashboard = () => {
   const { 
     clientes, pedidosPreVenda, registrosPosVenda, pagamentos, despesas, receitas, 
-    getDevedores, getTop3Compradores, getTop3ProdutosMaisReservados 
+    getDevedores, getTop3Compradores, getTop3ProdutosMaisVendidos 
   } = useStore();
   const navigate = useNavigate();
   const devedores = getDevedores();
+  const top3Compradores = getTop3Compradores();
+  const top3Produtos = getTop3ProdutosMaisVendidos();
 
 
   const mesAtual = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
@@ -49,6 +51,8 @@ const Dashboard = () => {
     { label: '🍰 Cadastrar Produto', action: () => navigate('/pedidos', { state: { tab: 'produtos' } }) },
     { label: '👤 Cadastrar Cliente', action: () => navigate('/clientes', { state: { showForm: true } }) },
   ];
+
+  const medalhas = ['🥇', '🥈', '🥉'];
 
   return (
     <div className="page-container">
@@ -105,7 +109,61 @@ const Dashboard = () => {
         </CardContent>
       </Card>
 
+      {/* Rankings */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {/* Top 3 Compradores */}
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-bold mb-3 flex items-center gap-2">
+              <User className="h-4 w-4 text-primary" /> Top Compradores
+              <span className="text-xs text-muted-foreground font-normal capitalize">({mesAtual})</span>
+            </h3>
+            {top3Compradores.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Nenhum pagamento este mês</p>
+            ) : (
+              <div className="space-y-2.5">
+                {top3Compradores.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between bg-muted/40 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-lg">{medalhas[i]}</span>
+                      <div>
+                        <p className="font-semibold text-sm leading-tight">{c.nome}</p>
+                        <p className="text-xs text-muted-foreground">{c.qtd} compra(s)</p>
+                      </div>
+                    </div>
+                    <span className="font-bold text-primary text-sm">{fmt(c.total)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
+        {/* Top 3 Produtos */}
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-bold mb-3 flex items-center gap-2">
+              <ShoppingBag className="h-4 w-4 text-primary" /> Produtos Mais Vendidos
+              <span className="text-xs text-muted-foreground font-normal capitalize">({mesAtual})</span>
+            </h3>
+            {top3Produtos.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Nenhuma venda este mês</p>
+            ) : (
+              <div className="space-y-2.5">
+                {top3Produtos.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between bg-muted/40 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-lg">{medalhas[i]}</span>
+                      <p className="font-semibold text-sm">{p.nome}</p>
+                    </div>
+                    <span className="font-bold text-primary text-sm">×{p.quantidade}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {barData.some((b) => b.receitas > 0 || b.despesas > 0) && (
         <Card className="mb-4">
