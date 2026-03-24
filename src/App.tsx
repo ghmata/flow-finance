@@ -12,6 +12,7 @@ import Pedidos from "./pages/Pedidos";
 import Orcamento from "./pages/Orcamento";
 import NotFound from "./pages/NotFound";
 import Sidebar from "./components/Sidebar";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
@@ -86,15 +87,17 @@ const App = () => {
 
           {/* Main content area */}
           <main className="flex-1 md:ml-64 relative pb-24 md:pb-6">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/clientes" element={<Clientes />} />
-              <Route path="/produtos" element={<Produtos />} />{/* Added route */}
-              <Route path="/devedores" element={<Devedores />} />
-              <Route path="/pedidos" element={<Pedidos />} />
-              <Route path="/orcamento" element={<Orcamento />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <ErrorBoundary>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/clientes" element={<Clientes />} />
+                <Route path="/produtos" element={<Produtos />} />
+                <Route path="/devedores" element={<Devedores />} />
+                <Route path="/pedidos" element={<Pedidos />} />
+                <Route path="/orcamento" element={<Orcamento />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </ErrorBoundary>
           </main>
 
           {/* BottomNav visible only on mobile */}

@@ -1,0 +1,36 @@
+{
+    "mcpServers": {
+        "context7": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@upstash/context7-mcp",
+                "--api-key",
+                "YOUR_API_KEY"
+            ]
+        },
+        "shadcn": {
+            "command": "npx",
+            "args": [
+                "shadcn@latest",
+                "mcp"
+            ]
+        },
+        "browser-tools": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@anthropic/browser-tools-mcp@latest"
+            ],
+            "description": "Browser monitoring: console logs, network, a11y tree, screenshots. Requires Chrome Extension."
+        },
+        "lighthouse": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "lighthouse-mcp@latest"
+            ],
+            "description": "Google Lighthouse audits: performance, accessibility, SEO, PWA, best practices."
+        }
+    }
+}

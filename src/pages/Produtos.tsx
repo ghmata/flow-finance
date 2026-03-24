@@ -173,20 +173,22 @@ const Produtos = () => {
                 <p className="font-bold text-lg">{p.nome_sabor}</p>
                 <p className="text-success font-semibold">{fmt(p.preco_unitario)}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                  <Button 
                     variant="ghost"
-                    size="sm"
+                    size="icon"
                     onClick={() => handleEditProduto(p)}
-                    className="text-primary hover:text-primary hover:bg-primary/10 h-8 px-2"
+                    className="text-primary hover:text-primary hover:bg-primary/10 h-11 w-11"
+                    aria-label={`Editar produto ${p.nome_sabor}`}
                  >
                     <Pencil className="h-4 w-4" />
                  </Button>
                  <Button 
                     variant="ghost" 
-                    size="sm"
+                    size="icon"
                     onClick={() => setDeleteState({ id: p.id, nome: p.nome_sabor })} 
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 h-11 w-11"
+                    aria-label={`Excluir produto ${p.nome_sabor}`}
                  >
                     <Trash2 className="h-4 w-4" />
                  </Button>

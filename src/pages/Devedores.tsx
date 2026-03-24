@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useStore } from '@/store/useStore';
 import PagamentoModal from '@/components/PagamentoModal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { PartyPopper, PackageCheck, CheckCircle, ChevronDown, ChevronUp, CircleDollarSign, Copy, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -13,6 +14,7 @@ type AbaReceber = 'areceber' | 'pagos';
 const Devedores = () => {
   const { pedidosPreVenda, getDevedores, getClienteNome, getProdutoNome, registrarPagamentoReserva, registrarPagamentoEmLote } = useStore();
   const devedores = getDevedores();
+  const isLoading = useStore((s) => s.isLoading);
   const totalGeral = devedores.reduce((acc, d) => acc + d.total, 0);
 
   const [aba, setAba] = useState<AbaReceber>('areceber');
@@ -31,9 +33,9 @@ const Devedores = () => {
   } | null>(null);
 
   const [expandedClients, setExpandedClients] = useState<string[]>([]);
-  const toggleClient = (id: string) => {
+  const toggleClient = useCallback((id: string) => {
       setExpandedClients(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
-  };
+  }, []);
   
   // Helper to handle batch payment logic
   const processBatchPayment = (clienteId: string, formaPagamento: string, valorPago?: number) => {
@@ -75,12 +77,11 @@ const Devedores = () => {
 
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
-  const handleCopyChargeMessage = async (clienteNome: string, valor: number) => {
+  const handleCopyChargeMessage = useCallback(async (clienteNome: string, valor: number) => {
     const defaultTemplate = `Estimado cliente [CLIENTE], boa tarde!\n\nA equipe da Theus Doces agradece imensamente pela sua parceria. Gostaríamos de lembrá-lo, de forma gentil, sobre o pagamento de [VALOR] referente aos doces.\n\nSegue a chave Pix para sua comodidade: 31920067388.`;
     
-    // Na correção futura pode buscar das config do dexie, mas por agora fixo:
     const finalMessage = defaultTemplate
-        .replace('[CLIENTE]', clienteNome.split(' ')[0]) // Usa o primeiro nome ou passa clienteNome inteiro. Depende da UI, deixar inteiro é seguro.
+        .replace('[CLIENTE]', clienteNome.split(' ')[0])
         .replace('[VALOR]', fmt(valor));
     
     try {
@@ -91,14 +92,13 @@ const Devedores = () => {
             variant: "default",
         })
     } catch(err) {
-        console.error("Falha ao copiar: ", err);
          toast({
             title: "Erro ao copiar",
             description: "Não foi possível copiar o texto para a área de transferência.",
             variant: "destructive",
         })
     }
-  }
+  }, [fmt, toast]);
 
   // Filter devedores
   const filteredDevedores = devedores.filter((d) =>
@@ -252,107 +252,176 @@ const Devedores = () => {
   ];
 
   return (
-    <div className="page-container">
-      <h1 className="page-title">💰 A Receber</h1>
+    <div className="page-container pb-24 md:pb-6 !pt-0 !px-0">
+      {/* === HERO ZONE === */}
+      <div className="relative bg-gradient-to-br from-[#1e1b5e] via-[#2d2a8a] to-[#4338ca] px-5 pt-8 pb-6 overflow-hidden">
+        {/* Decorative circles */}
+        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/5" />
+        <div className="absolute top-16 -left-6 w-28 h-28 rounded-full bg-white/5" />
 
-      <input
-        className="input-lg mb-4"
-        placeholder="🔍 Buscar cliente..."
-        value={busca}
-        onChange={(e) => setBusca(e.target.value)}
-      />
+        <h1 className="relative text-2xl font-bold text-white mb-4">
+          {aba === 'areceber' ? '💰 A Receber' : '✅ Pagos / Não Entregues'}
+        </h1>
 
-      <div className="flex gap-1 mb-5 bg-muted rounded-xl p-1">
-        {abas.map((a) => (
-          <button
-            key={a.key}
-            onClick={() => setAba(a.key)}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-              aba === a.key ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground'
-            }`}
-          >
-            {a.label}
-          </button>
-        ))}
+        {/* Search */}
+        <div className="relative mb-4">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40 text-sm">🔍</span>
+          <input
+            className="w-full backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/30"
+            placeholder="Buscar cliente..."
+            aria-label="Buscar devedor por nome do cliente"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+        </div>
+
+        {/* Tabs — Glassmorphism */}
+        <div className="relative flex gap-1.5 mb-5 backdrop-blur-xl bg-white/10 rounded-xl p-1 border border-white/15">
+          {abas.map((a) => (
+            <button
+              key={a.key}
+              onClick={() => setAba(a.key)}
+              className={`flex-1 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                aba === a.key
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-white/60 hover:text-white/80'
+              }`}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Summary Card — Glassmorphism (mudar conforme aba) */}
+        {aba === 'areceber' ? (
+          <div className="relative backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-5">
+            <p className="text-sm text-white/70">Total a Receber</p>
+            <p className="text-3xl font-bold text-white mt-1">{fmt(totalGeral)}</p>
+            <p className="text-sm text-white/50 mt-1">{devedores.length} pessoa(s) devendo</p>
+          </div>
+        ) : (
+          <div className="relative backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-5">
+            <p className="text-sm text-white/70">Valor Pago / Não Entregue</p>
+            <p className="text-3xl font-bold text-white mt-1">{fmt(totalPagosNE)}</p>
+            <p className="text-sm text-white/50 mt-1">{groupedPagosNE.length} cliente(s) aguardando entrega</p>
+          </div>
+        )}
       </div>
 
-      {aba === 'areceber' && (
-        <>
-          <div className="gradient-warning rounded-2xl p-5 text-warning-foreground mb-5">
-            <p className="text-sm opacity-90">Total a Receber</p>
-            <p className="text-3xl font-bold">{fmt(totalGeral)}</p>
-            <p className="text-sm opacity-80">{devedores.length} pessoa(s) devendo</p>
-          </div>
+      {/* === CONTENT ZONE === */}
+      <div className="px-5 pt-5 space-y-5">
 
-          {filteredDevedores.length === 0 ? (
-            <EmptyState
-              icon={PartyPopper}
-              title="Ninguém devendo!"
-              description="Todos os pagamentos estão em dia."
-            />
-          ) : (
-            <div className="space-y-6">
-              {groupedByDate.map((group) => (
-                <div key={group.dateKey}>
-                  {/* Date Header */}
-                  <button
-                    onClick={() => toggleDate(group.dateKey)}
-                    className="flex items-center justify-between w-full mb-3 px-1 group"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-primary" />
-                      <h2 className="text-sm font-bold text-foreground capitalize">
-                        {formatDateHeader(group.dateKey)}
-                      </h2>
-                      <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                        {group.devedores.length} cliente(s) • {fmt(group.total)}
-                      </span>
+        {/* ABA: A RECEBER */}
+        {aba === 'areceber' && (
+          <>
+            {isLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-border/40 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <Skeleton className="h-10 w-10 rounded-full" />
+                        <div className="space-y-1">
+                          <Skeleton className="h-5 w-28" />
+                          <Skeleton className="h-3 w-20" />
+                        </div>
+                      </div>
+                      <Skeleton className="h-8 w-24" />
                     </div>
-                    {collapsedDates.has(group.dateKey) ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </button>
+                  </div>
+                ))}
+              </div>
+            ) : filteredDevedores.length === 0 ? (
+              <EmptyState
+                icon={PartyPopper}
+                title="Ninguém devendo!"
+                description="Todos os pagamentos estão em dia."
+              />
+            ) : (
+              <div className="space-y-6">
+                {groupedByDate.map((group) => (
+                  <div key={group.dateKey}>
+                    {/* Date Header */}
+                    <button
+                      onClick={() => toggleDate(group.dateKey)}
+                      className="flex items-center justify-between w-full mb-3 px-1 group"
+                      aria-expanded={!collapsedDates.has(group.dateKey)}
+                      aria-label={`Grupo de devedores: ${formatDateHeader(group.dateKey)}`}
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Calendar className="h-4 w-4 text-indigo-600 flex-shrink-0" />
+                        <h2 className="text-sm font-bold text-foreground capitalize">
+                          {formatDateHeader(group.dateKey)}
+                        </h2>
+                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          {group.devedores.length} cliente(s) • {fmt(group.total)}
+                        </span>
+                      </div>
+                      {collapsedDates.has(group.dateKey) ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </button>
 
-                  {/* Devedores dentro da data */}
-                  {!collapsedDates.has(group.dateKey) && (
-                    <div className="space-y-4">
-                      {group.devedores.map((dev) => (
-                        <div key={dev.cliente.id} className="card-elevated overflow-hidden">
-                          <div className="gradient-primary p-4 text-primary-foreground flex items-center justify-between cursor-pointer" onClick={() => toggleClient(dev.cliente.id)}>
-                            <div className="flex items-center gap-3">
-                              <div className="bg-primary-foreground/20 rounded-full p-2.5">
-                                <span className="text-2xl">👤</span>
-                              </div>
-                              <div>
-                                <h3 className="text-xl font-bold">{dev.cliente.nome}</h3>
-                                {dev.cliente.telefone && (
-                                  <p className="text-sm opacity-90">📱 {dev.cliente.telefone}</p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-right flex items-center gap-2">
-                               <div>
-                                  <p className="text-xs opacity-80">Deve</p>
-                                  <p className="text-2xl font-bold">{fmt(dev.total)}</p>
-                               </div>
-                               {expandedClients.includes(dev.cliente.id) ? <ChevronUp /> : <ChevronDown />}
-                            </div>
-                          </div>
-
-                          {expandedClients.includes(dev.cliente.id) && (
-                          <div className="p-4 space-y-2 bg-muted/10">
-                            {dev.itens.map((item) => (
-                              <div key={`${item.id}-${item.itemId}`} className="flex items-center justify-between bg-white border border-border rounded-xl p-3 shadow-sm">
-                                <div>
-                                  <p className="font-semibold">{item.descricao}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    📅 há {item.dias} dia(s) • {item.tipo === 'prevenda' ? '📦 Reserva' : '🛒 Pronta Entrega'}
-                                  </p>
+                    {/* Devedores dentro da data */}
+                    {!collapsedDates.has(group.dateKey) && (
+                      <div className="space-y-4">
+                        {group.devedores.map((dev) => (
+                          <div key={dev.cliente.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-border/50">
+                            {/* Client Header */}
+                            <div
+                              className="bg-gradient-to-r from-[#1e1b5e] to-[#4338ca] p-4 text-white cursor-pointer"
+                              onClick={() => toggleClient(dev.cliente.id)}
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={expandedClients.includes(dev.cliente.id)}
+                              aria-label={`Expandir detalhes de ${dev.cliente.nome}`}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleClient(dev.cliente.id); } }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="bg-white/15 rounded-full p-2 flex-shrink-0">
+                                    <span className="text-lg">👤</span>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <h3 className="text-base font-bold truncate">{dev.cliente.nome}</h3>
+                                    {dev.cliente.telefone && (
+                                      <p className="text-xs text-white/60">📱 {dev.cliente.telefone}</p>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="text-right">
-                                  <p className="font-bold text-lg text-primary">{fmt(item.valor)}</p>
+                                <div className="text-right flex items-center gap-1.5 flex-shrink-0">
+                                  <div>
+                                    <p className="text-[10px] text-white/60 uppercase tracking-wide">Deve</p>
+                                    <p className="text-lg font-bold">{fmt(dev.total)}</p>
+                                  </div>
+                                  {expandedClients.includes(dev.cliente.id) ? <ChevronUp className="h-4 w-4 text-white/60" /> : <ChevronDown className="h-4 w-4 text-white/60" />}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Expanded Items */}
+                            {expandedClients.includes(dev.cliente.id) && (
+                            <div className="p-3 space-y-2 bg-gray-50/50">
+                              {dev.itens.map((item) => (
+                                <div key={`${item.id}-${item.itemId}`} className={`bg-white border rounded-xl p-3 shadow-sm space-y-2 ${item.dias > 10 ? 'border-red-300 bg-red-50/30' : 'border-border/60'}`}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <p className="font-semibold text-sm">{item.descricao}</p>
+                                        {item.dias > 10 && (
+                                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full flex-shrink-0">
+                                            ⚠️ Atrasado
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">
+                                        📅 há {item.dias} dia(s) • {item.tipo === 'prevenda' ? '📦 Reserva' : '🛒 Pronta Entrega'}
+                                      </p>
+                                    </div>
+                                    <p className="font-bold text-lg text-indigo-600 flex-shrink-0">{fmt(item.valor)}</p>
+                                  </div>
                                   <button
                                     onClick={() =>
                                       setPagModal({
@@ -363,145 +432,147 @@ const Devedores = () => {
                                         valor: item.valor,
                                       })
                                     }
-                                    className="text-xs font-semibold mt-1 bg-success/10 text-success px-2 py-1 rounded hover:bg-success/20 transition-colors"
+                                    className="w-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2.5 min-h-[44px] rounded-xl hover:bg-emerald-100 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+                                    aria-label={`Pagar ${item.descricao} de ${dev.cliente.nome}`}
                                   >
                                     💵 Pagar Item
                                   </button>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                          )}
-                          
-                          {/* Footer Actions */}
-                          <div className="px-4 py-3 bg-muted/30 border-t flex justify-end items-center gap-2">
-                              <button
-                                onClick={() => toggleClient(dev.cliente.id)}
-                                className="text-xs text-muted-foreground underline mr-auto"
-                              >
-                                {expandedClients.includes(dev.cliente.id) ? 'Ocultar itens' : `Ver ${dev.itens.length} itens`}
-                              </button>
-                              
-                              <Button
-                                variant="outline"
-                                onClick={() => handleCopyChargeMessage(dev.cliente.nome, dev.total)}
-                                className="text-muted-foreground border-border px-3 rounded-xl shadow-sm transition-all h-10 hover:bg-muted"
-                              >
-                                <Copy className="mr-2 h-4 w-4" />
-                                Cobrar
-                              </Button>
+                              ))}
+                            </div>
+                            )}
+                            
+                            {/* Footer Actions */}
+                            <div className="px-3 py-3 bg-gray-50 border-t border-border/30 space-y-2">
+                                <button
+                                  onClick={() => toggleClient(dev.cliente.id)}
+                                  className="text-xs text-muted-foreground underline"
+                                >
+                                  {expandedClients.includes(dev.cliente.id) ? 'Ocultar itens' : `Ver ${dev.itens.length} itens`}
+                                </button>
+                                
+                                <div className="flex gap-2 w-full">
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => handleCopyChargeMessage(dev.cliente.nome, dev.total)}
+                                    className="text-muted-foreground border-border px-3 rounded-xl shadow-sm transition-all min-h-[44px] flex-1"
+                                  >
+                                    <Copy className="h-4 w-4 flex-shrink-0 mr-1.5" />
+                                    Cobrar
+                                  </Button>
 
-                              <Button
-                                onClick={() => {
-                                    setPagModal({
-                                        tipo: 'prevenda',
-                                        referenciaId: dev.cliente.id,
-                                        itemId: '', 
-                                        clienteNome: dev.cliente.nome,
-                                        valor: dev.total,
-                                        isBatch: true
-                                    });
-                                }}
-                                className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition-all h-10"
-                              >
-                                <CircleDollarSign className="mr-2 h-4 w-4" />
-                                Receber Tudo ({fmt(dev.total)})
-                              </Button>
+                                  <Button
+                                    onClick={() => {
+                                        setPagModal({
+                                            tipo: 'prevenda',
+                                            referenciaId: dev.cliente.id,
+                                            itemId: '', 
+                                            clienteNome: dev.cliente.nome,
+                                            valor: dev.total,
+                                            isBatch: true
+                                        });
+                                    }}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl shadow-sm transition-all min-h-[44px] flex-1"
+                                  >
+                                    <CircleDollarSign className="h-4 w-4 flex-shrink-0 mr-1.5" />
+                                    <span className="truncate">Receber {fmt(dev.total)}</span>
+                                  </Button>
+                                </div>
+                            </div>
                           </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ABA: PAGOS / NÃO ENTREGUES */}
+        {aba === 'pagos' && (
+          <>
+            {filteredPagosNE.length === 0 ? (
+              <EmptyState
+                icon={PackageCheck}
+                title="Nenhum pedido aguardando"
+                description="Todos os pedidos pagos foram entregues."
+              />
+            ) : (
+              <div className="space-y-4">
+                {filteredPagosNE.map((group) => (
+                  <div key={group.cliente.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-border/50">
+                    {/* Client Header — Orange theme */}
+                    <div
+                      className="bg-gradient-to-r from-orange-500 to-amber-500 p-4 text-white cursor-pointer"
+                      onClick={() => toggleClient(group.cliente.id)}
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={expandedClients.includes(group.cliente.id)}
+                      aria-label={`Expandir detalhes de ${group.cliente.nome}`}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleClient(group.cliente.id); } }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="bg-white/15 rounded-full p-2 flex-shrink-0">
+                            <span className="text-lg">📦</span>
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="text-base font-bold truncate">{group.cliente.nome}</h3>
+                            <p className="text-xs text-white/70">{group.itens.length} item(s) pago(s)</p>
+                          </div>
+                        </div>
+                        <div className="text-right flex items-center gap-1.5 flex-shrink-0">
+                          <div>
+                            <p className="text-[10px] text-white/70 uppercase tracking-wide">Pago</p>
+                            <p className="text-lg font-bold">{fmt(group.total)}</p>
+                          </div>
+                          {expandedClients.includes(group.cliente.id) ? <ChevronUp className="h-4 w-4 text-white/60" /> : <ChevronDown className="h-4 w-4 text-white/60" />}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded Items */}
+                    {expandedClients.includes(group.cliente.id) && (
+                    <div className="p-3 space-y-2 bg-gray-50/50">
+                      {group.itens.map((item) => (
+                        <div key={`${item.id}-${item.itemId}`} className="bg-white border border-border/60 rounded-xl p-3 shadow-sm space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm">{item.descricao}</p>
+                              <p className="text-xs text-muted-foreground">
+                                📅 Pago em {new Date(item.data).toLocaleDateString('pt-BR')} • {item.quantidade}x
+                              </p>
+                            </div>
+                            <p className="font-bold text-lg text-orange-600 flex-shrink-0">{fmt(item.valor)}</p>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const { entregarItem, entregarPreVenda } = useStore.getState();
+                              if (item.itemId === item.id) {
+                                entregarPreVenda(item.id);
+                              } else {
+                                entregarItem(item.id, item.itemId);
+                              }
+                            }}
+                            className="w-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2.5 min-h-[44px] rounded-xl hover:bg-emerald-100 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+                            aria-label={`Entregar ${item.descricao}`}
+                          >
+                            <CheckCircle className="h-4 w-4" /> Entregar
+                          </button>
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {aba === 'pagos' && (
-        <>
-          <div className="bg-gradient-to-r from-primary to-primary/70 rounded-2xl p-5 text-primary-foreground mb-5">
-            <p className="text-sm opacity-90">Valor Pago/Não Entregue</p>
-            <p className="text-3xl font-bold">{fmt(totalPagosNE)}</p>
-            <p className="text-sm opacity-80">{groupedPagosNE.length} cliente(s) aguardando entrega</p>
-          </div>
-
-          {filteredPagosNE.length === 0 ? (
-            <EmptyState
-              icon={PackageCheck}
-              title="Nenhum pedido aguardando"
-              description="Todos os pedidos pagos foram entregues."
-            />
-          ) : (
-            <div className="space-y-4">
-              {filteredPagosNE.map((group) => (
-                <div key={group.cliente.id} className="card-elevated overflow-hidden">
-                  <div className="bg-gradient-to-r from-primary/10 to-primary/5 p-4 flex items-center justify-between cursor-pointer" onClick={() => toggleClient(group.cliente.id)}>
-                     <div className="flex items-center gap-3">
-                       <div className="bg-primary/20 rounded-full p-2.5 text-primary">
-                         <span className="text-2xl">👤</span>
-                       </div>
-                       <div>
-                         <h3 className="text-xl font-bold text-foreground">{group.cliente.nome}</h3>
-                         <p className="text-sm text-muted-foreground">{group.itens.length} item(s) pago(s)</p>
-                       </div>
-                     </div>
-                     <div className="text-right flex items-center gap-2">
-                        <div>
-                           <p className="text-xs text-muted-foreground">Total Pago</p>
-                           <p className="text-xl font-bold text-primary">{fmt(group.total)}</p>
-                        </div>
-                        {expandedClients.includes(group.cliente.id) ? <ChevronUp className="text-muted-foreground" /> : <ChevronDown className="text-muted-foreground" />}
-                     </div>
+                    )}
                   </div>
-
-                  {expandedClients.includes(group.cliente.id) && (
-                  <div className="p-4 space-y-2 bg-muted/10">
-                    {group.itens.map((item) => (
-                      <div key={`${item.id}-${item.itemId}`} className="flex items-center justify-between bg-white border border-border rounded-xl p-3 shadow-sm">
-                        <div>
-                          <p className="font-semibold">{item.descricao}</p>
-                          <p className="text-xs text-muted-foreground">
-                            📅 Pago em {new Date(item.data).toLocaleDateString('pt-BR')} • {item.quantidade}x
-                          </p>
-                        </div>
-                        <div className="text-right flex flex-col items-end gap-1">
-                          <p className="font-bold text-lg text-primary">{fmt(item.valor)}</p>
-                          
-                           {/* Action to Deliver Individual Item? Store supports entregarPreVenda (full) or granular? 
-                               We have `entregarItem` in store but need to export it to component.
-                               Let's use useStore() hook to get it.
-                           */}
-                           <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs border-green-200 text-green-700 hover:bg-green-50 hover:text-green-800"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Call store action
-                                    const { entregarItem, entregarPreVenda } = useStore.getState();
-                                    // If item.itemId is same as item.id (legacy), call entregarPreVenda
-                                    if (item.itemId === item.id) {
-                                        entregarPreVenda(item.id);
-                                    } else {
-                                        entregarItem(item.id, item.itemId);
-                                    }
-                                }}
-                            >
-                                <CheckCircle className="h-3 w-3 mr-1" /> Entregar
-                            </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {pagModal && (
         <PagamentoModal

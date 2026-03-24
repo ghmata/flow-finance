@@ -176,17 +176,17 @@ const Clientes = () => {
                     <p className="font-bold text-lg">{c.nome}</p>
                     {c.telefone && <p className="text-muted-foreground text-sm">📱 {c.telefone}</p>}
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     <button 
                       onClick={() => startEdit(c)} 
-                      className="text-primary text-xl p-2"
+                      className="text-primary text-xl p-3 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-primary/10 transition-colors"
                       aria-label={`Editar cliente ${c.nome}`}
                     >
                       <span aria-hidden="true">✏️</span>
                     </button>
                     <button 
                       onClick={() => setItemToDelete({ id: c.id, nome: c.nome })} 
-                      className="text-destructive text-xl p-2"
+                      className="text-destructive text-xl p-3 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-destructive/10 transition-colors"
                       aria-label={`Excluir cliente ${c.nome}`}
                     >
                       <span aria-hidden="true">🗑️</span>
