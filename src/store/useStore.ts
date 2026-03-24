@@ -714,8 +714,8 @@ export const useStore = create<AppState>((set, get) => ({
                 tipo: 'prevenda', id: p.id, itemId: p.id,
                 descricao: (produto?.nome_sabor || 'Produto') + (p.status === 'parcial' ? ' (Restante)' : ''),
                 valor: valorRestante,
-                dias: daysBetween(p.data_entrega || p.data_pedido),
-                data: p.data_entrega || p.data_pedido,
+                dias: daysBetween(p.data_pedido),
+                data: p.data_pedido,
                 paidAt: null
              });
         } else {
@@ -740,8 +740,8 @@ export const useStore = create<AppState>((set, get) => ({
                       tipo: 'prevenda', id: p.id, itemId: 'balance-' + p.id,
                       descricao: `Saldo Restante (Req. ${p.id.substr(0,4)})`,
                       valor: valorRestante,
-                      dias: daysBetween(p.data_entrega || p.data_pedido),
-                      data: p.data_entrega || p.data_pedido,
+                      dias: daysBetween(p.data_pedido),
+                      data: p.data_pedido,
                       paidAt: null
                   });
              } else {
@@ -751,8 +751,8 @@ export const useStore = create<AppState>((set, get) => ({
                       tipo: 'prevenda', id: p.id, itemId: item.id,
                       descricao: item.produto_nome,
                       valor: item.subtotal,
-                      dias: daysBetween(p.data_entrega || p.data_pedido),
-                      data: p.data_entrega || p.data_pedido,
+                      dias: daysBetween(p.data_pedido),
+                      data: p.data_pedido,
                       paidAt: item.paidAt,
                     });
                 });
