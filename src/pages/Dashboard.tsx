@@ -53,13 +53,10 @@ const Dashboard = () => {
   const despesasMes = despesas.filter((d) => d.data_despesa.startsWith(mesKey)).reduce((acc, d) => acc + d.valor, 0);
   const saldoMensal = receitasMes - despesasMes;
 
-  // Atrasados — Pedidos pendentes com mais de 10 dias
-  const isOverdue = (dateStr: string) => {
-    const d = new Date(dateStr);
-    const now = new Date();
-    return Math.floor((now.getTime() - d.getTime()) / 86400000) > 10;
-  };
-  const atrasados = pedidosPreVenda.filter((p) => p.status === 'pendente' && isOverdue(p.data_pedido)).length;
+  // Atrasados — Devedores com itens pendentes há mais de 10 dias
+  const atrasados = devedores.filter((d) =>
+    d.itens.some((item) => item.dias > 10)
+  ).length;
 
   const fmt = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
