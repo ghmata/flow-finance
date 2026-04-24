@@ -13,6 +13,7 @@ import Orcamento from "./pages/Orcamento";
 import NotFound from "./pages/NotFound";
 import Sidebar from "./components/Sidebar";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { BackupBanner } from "./components/BackupBanner";
 
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
@@ -87,6 +88,7 @@ const App = () => {
 
           {/* Main content area */}
           <main className="flex-1 md:ml-64 relative pb-24 md:pb-6">
+            <BackupBanner />
             <ErrorBoundary>
               <Routes>
                 <Route path="/" element={<Dashboard />} />

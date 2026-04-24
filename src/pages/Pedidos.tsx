@@ -454,13 +454,17 @@ const Pedidos = () => {
                     <div className="space-y-4">
                       {group.orders.map((p) => {
                         const isPaidNotDelivered = p.status === 'pago' && !p.data_entrega;
-                        const canBeDelivered = !p.data_entrega;
                         const overdue = p.status === 'pendente' && isOverdue(p.data_pedido);
                         
-                        let displayItems = p.itens || [];
+                        // Build displayItems first — needed to compute canBeDelivered
+                        let displayItems = (p.itens || []).map((item, idx) => ({
+                          ...item,
+                          // Garante que todo item tenha ID para entrega granular
+                          id: item.id || `gen-${p.id}-${idx}`
+                        }));
                         if (displayItems.length === 0 && p.produto_id) {
                             displayItems = [{
-                                id: 'legacy',
+                                id: `legacy-${p.id}`,
                                 produto_id: p.produto_id,
                                 produto_nome: getProdutoNome(p.produto_id),
                                 quantidade: p.quantidade || 1,
@@ -471,6 +475,10 @@ const Pedidos = () => {
                             }];
                         }
 
+                        // "Entregar Todos" only visible when at least 1 item is undelivered
+                        const hasUndeliveredItems = displayItems.some(i => !i.deliveredAt);
+                        const canBeDelivered = hasUndeliveredItems && p.status !== 'cancelado';
+
                         const headerGradient = isPaidNotDelivered
                           ? 'from-orange-500 to-amber-500'
                           : overdue
@@ -478,6 +486,7 @@ const Pedidos = () => {
                             : p.status === 'pago'
                               ? 'from-emerald-600 to-emerald-500'
                               : 'from-[#1e1b5e] to-[#4338ca]';
+
 
                         return (
                         <div key={p.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-border/50">
@@ -531,8 +540,8 @@ const Pedidos = () => {
                                       )}
                                     </div>
                                   </div>
-                                  {/* Row 2: Deliver action */}
-                                  {!itemDelivered && (
+                                  {/* Entrega individual: disponível para qualquer item com ID válido */}
+                                  {!itemDelivered && !!item.id && (
                                     <button 
                                       onClick={() => entregarItem(p.id, item.id)}
                                       className="w-full text-xs font-semibold py-2.5 min-h-[44px] rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"

@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import {
   TrendingUp, TrendingDown, DollarSign, CheckCircle2,
   Package, ShoppingCart, Wallet, Cake,
-  ArrowRight, Star, AlertTriangle
+  ArrowRight, HardDrive, AlertTriangle, Zap
 } from 'lucide-react';
+import { BackupDialog } from '@/components/BackupDialog';
 
 const COLORS = ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
 
@@ -27,6 +29,7 @@ const getStartOfWeek = () => {
 };
 
 const Dashboard = () => {
+  const [backupOpen, setBackupOpen] = useState(false);
   const {
     clientes, pedidosPreVenda, registrosPosVenda, pagamentos, despesas, receitas,
     getDevedores
@@ -83,6 +86,7 @@ const Dashboard = () => {
     { label: 'Pronta Entrega', icon: ShoppingCart, action: () => navigate('/pedidos', { state: { tab: 'posvenda' } }), color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
     { label: 'Nova Despesa', icon: Wallet, action: () => navigate('/orcamento', { state: { tab: 'despesas' } }), color: 'bg-red-50 text-red-700 border-red-200' },
     { label: 'Novo Produto', icon: Cake, action: () => navigate('/pedidos', { state: { tab: 'produtos' } }), color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    { label: 'Backup', icon: HardDrive, action: () => setBackupOpen(true), color: 'bg-sky-50 text-sky-700 border-sky-200' },
   ];
 
   return (
@@ -184,7 +188,7 @@ const Dashboard = () => {
         {/* Ações Rápidas */}
         <div>
           <h2 className="text-sm font-bold text-foreground/80 mb-3 flex items-center gap-1.5">
-            <Star className="h-4 w-4 text-amber-500" /> Ações Rápidas
+            <Zap className="h-4 w-4 text-amber-500" /> Ações Rápidas
           </h2>
           <div className="grid grid-cols-2 gap-2.5">
             {quickActions.map((qa) => (
@@ -280,6 +284,7 @@ const Dashboard = () => {
           </div>
         )}
       </div>
+      <BackupDialog open={backupOpen} onOpenChange={setBackupOpen} />
     </div>
   );
 };

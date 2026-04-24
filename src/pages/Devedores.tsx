@@ -367,11 +367,18 @@ const Devedores = () => {
                     {/* Devedores dentro da data */}
                     {!collapsedDates.has(group.dateKey) && (
                       <div className="space-y-4">
-                        {group.devedores.map((dev) => (
-                          <div key={dev.cliente.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-border/50">
+                        {group.devedores.map((dev) => {
+                          const hasAtraso = dev.itens.some(i => i.dias > 10);
+                          return (
+                          <div key={dev.cliente.id} className={`bg-white rounded-2xl overflow-hidden shadow-sm border ${hasAtraso ? 'border-red-300 ring-1 ring-red-100' : 'border-border/50'}`}>
+                            {hasAtraso && (
+                              <div className="bg-red-50 text-red-600 text-xs font-bold px-3 py-2 text-center border-b border-red-100">
+                                ⚠️ Pagamento Atrasado (Mais de 10 dias)
+                              </div>
+                            )}
                             {/* Client Header */}
                             <div
-                              className="bg-gradient-to-r from-[#1e1b5e] to-[#4338ca] p-4 text-white cursor-pointer"
+                              className={`p-4 text-white cursor-pointer ${hasAtraso ? 'bg-gradient-to-r from-red-700 to-red-600' : 'bg-gradient-to-r from-[#1e1b5e] to-[#4338ca]'}`}
                               onClick={() => toggleClient(dev.cliente.id)}
                               role="button"
                               tabIndex={0}
@@ -413,6 +420,11 @@ const Devedores = () => {
                                         {item.dias > 10 && (
                                           <span className="text-[10px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full flex-shrink-0">
                                             ⚠️ Atrasado
+                                          </span>
+                                        )}
+                                        {item.deliveredAt && (
+                                          <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full flex-shrink-0">
+                                            ✅ Entregue
                                           </span>
                                         )}
                                       </div>
@@ -480,7 +492,8 @@ const Devedores = () => {
                                 </div>
                             </div>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     )}
                   </div>

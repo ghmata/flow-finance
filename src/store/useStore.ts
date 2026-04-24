@@ -394,33 +394,65 @@ export const useStore = create<AppState>((set, get) => ({
   entregarItem: async (pedido_id, item_id) => {
       console.log('[entregarItem] Iniciando...', { pedido_id, item_id });
       try {
+        if (!item_id || typeof item_id !== 'string') {
+          console.error('[entregarItem] item_id inválido:', item_id);
+          return false;
+        }
+
         const pedido = get().pedidosPreVenda.find((p) => p.id === pedido_id);
         if (!pedido) return false;
 
+        // Suporte para itens antigos que não tem ID nativo no DB (usam index)
+        let itemIndex = -1;
+        if (item_id.startsWith('gen-') || item_id.startsWith('legacy-')) {
+          const parts = item_id.split('-');
+          itemIndex = parseInt(parts[parts.length - 1], 10);
+          if (isNaN(itemIndex) && item_id.startsWith('legacy-')) {
+            itemIndex = 0; // Legacy (produto único) é sempre index 0
+          }
+        } else {
+          itemIndex = pedido.itens.findIndex(i => i.id === item_id);
+        }
+
+        if (itemIndex === -1 || itemIndex >= pedido.itens.length) {
+          console.error('[entregarItem] Item não encontrado no pedido:', item_id);
+          return false;
+        }
+
+        const targetItem = pedido.itens[itemIndex];
+
+        // Skip if already delivered
+        if (targetItem.deliveredAt) {
+          console.warn('[entregarItem] Item já entregue:', item_id);
+          return true;
+        }
+
         const data_entrega = today();
         
-        const newItens = pedido.itens.map(i => i.id === item_id ? ({...i, deliveredAt: data_entrega}) : i);
+        const newItens = pedido.itens.map((i, idx) => 
+          idx === itemIndex ? ({...i, deliveredAt: data_entrega}) : i
+        );
         
-        // Check if all items are delivered to update parent status
+        // Check if all items are now delivered to update parent status
         const allDelivered = newItens.every(i => !!i.deliveredAt);
         const allPaid = newItens.every(i => !!i.paidAt);
         
         let novoStatus: PedidoPreVenda['status'] = pedido.status;
-        if (allPaid && allDelivered) novoStatus = 'pago'; // Or 'concluido' if generic
+        if (allPaid && allDelivered) novoStatus = 'pago';
         else if (allDelivered) novoStatus = 'entregue';
         
         const updateData = { itens: newItens, status: novoStatus, ...(allDelivered ? {data_entrega} : {}) };
 
         const res = await dbUpdate('pedidosPreVenda', pedido_id, updateData);
-         if (res.success) {
-            set((s) => ({
-              pedidosPreVenda: s.pedidosPreVenda.map((p) =>
-                p.id === pedido_id ? { ...p, ...updateData } : p
-              ),
-            }));
-            return true;
-          }
-          return false;
+        if (res.success) {
+          set((s) => ({
+            pedidosPreVenda: s.pedidosPreVenda.map((p) =>
+              p.id === pedido_id ? { ...p, ...updateData } : p
+            ),
+          }));
+          return true;
+        }
+        return false;
       } catch (e) {
         console.error('[entregarItem] Exceção:', e);
         return false;
@@ -716,7 +748,8 @@ export const useStore = create<AppState>((set, get) => ({
                 valor: valorRestante,
                 dias: daysBetween(p.data_pedido),
                 data: p.data_pedido,
-                paidAt: null
+                paidAt: null,
+                deliveredAt: p.data_entrega || null
              });
         } else {
              // Granular Items Logic with Partial Support
@@ -742,20 +775,25 @@ export const useStore = create<AppState>((set, get) => ({
                       valor: valorRestante,
                       dias: daysBetween(p.data_pedido),
                       data: p.data_pedido,
-                      paidAt: null
+                      paidAt: null,
+                      deliveredAt: p.data_entrega || null
                   });
              } else {
-                itens.forEach(item => {
-                    if (item.paidAt) return; // Skip paid
-                    entry.itens.push({
-                      tipo: 'prevenda', id: p.id, itemId: item.id,
-                      descricao: item.produto_nome,
-                      valor: item.subtotal,
-                      dias: daysBetween(p.data_pedido),
-                      data: p.data_pedido,
-                      paidAt: item.paidAt,
-                    });
-                });
+                 itens.forEach(item => {
+                     if (item.paidAt) return; // Skip paid
+                     // Use item-level deliveredAt, fallback to order-level data_entrega
+                     // (covers case where 'Entregar Todos' was used, setting status='entregue')
+                     const deliveredAt = item.deliveredAt || (p.status === 'entregue' ? p.data_entrega : null) || null;
+                     entry.itens.push({
+                       tipo: 'prevenda', id: p.id, itemId: item.id,
+                       descricao: item.produto_nome,
+                       valor: item.subtotal,
+                       dias: daysBetween(p.data_pedido),
+                       data: p.data_pedido,
+                       paidAt: item.paidAt,
+                       deliveredAt,
+                     });
+                 });
              }
         }
       });
@@ -785,6 +823,7 @@ export const useStore = create<AppState>((set, get) => ({
               dias: daysBetween(r.data_registro),
               data: r.data_registro,
               paidAt: r.data_pagamento, // likely null
+              deliveredAt: r.data_registro, // PosVenda is considered delivered immediately
             });
         } else {
              if (r.status === 'parcial') {
@@ -795,7 +834,8 @@ export const useStore = create<AppState>((set, get) => ({
                       valor: valorRestante,
                       dias: daysBetween(r.data_registro),
                       data: r.data_registro,
-                      paidAt: null
+                      paidAt: null,
+                      deliveredAt: r.data_registro,
                   });
              } else {
                  itens.forEach(item => {
@@ -808,6 +848,7 @@ export const useStore = create<AppState>((set, get) => ({
                       dias: daysBetween(r.data_registro),
                       data: r.data_registro,
                       paidAt: item.paidAt,
+                      deliveredAt: item.deliveredAt || r.data_registro,
                     });
                  });
              }
