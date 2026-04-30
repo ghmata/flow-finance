@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { ScheduledOrder } from '@/types';
 import { differenceInMinutes, parseISO, startOfDay, addDays, isSameDay, setHours, setMinutes, isAfter, isBefore } from 'date-fns';
 import { toast } from 'sonner'; // Using sonner for UI notifications since we are frontend-only
+import { dbUpdate, dbAdd } from '@/lib/db-operations';
 
 /**
  * Serviço de verificação periódica
@@ -122,25 +123,19 @@ function shouldMoveToReady(order: ScheduledOrder, currentTime: Date) {
 
 async function moveToReadyForDelivery(orderId: string) {
   try {
-    await db.scheduledOrders.update(orderId, {
+    await dbUpdate('scheduledOrders', orderId, {
         status: "ready_for_delivery",
         movedToReadyAt: new Date().toISOString()
-    });
+    } as any);
     
     // Also update main table
     // Note: status 'pronta_entrega' must be supported by types
-    await db.pedidosPreVenda.update(orderId, {
-        status: "pronta_entrega", // or 'entregue' if that was the flow? prompt said ready_for_delivery
-        history: [ 
-             // We'd need to fetch current history but update supports raw changes if we carefully construct
-             // For simplicity, we assume we need to read-modify-write for complex objects unless update supports $push
-        ] as any 
-    });
+    // We update below with read-modify-write
     
      // Easier to read-modify-write for nested 'history'
     const order = await db.pedidosPreVenda.get(orderId);
     if(order) {
-        await db.pedidosPreVenda.update(orderId, {
+        await dbUpdate('pedidosPreVenda', orderId, {
              status: 'pronta_entrega',
              history: [
                 ...(order.history || []),
@@ -149,7 +144,7 @@ async function moveToReadyForDelivery(orderId: string) {
                     timestamp: new Date().toISOString()
                 }
              ]
-        });
+        } as any);
     }
     
     sendNotification({
@@ -172,7 +167,7 @@ async function markNotificationSent(orderId: string, notificationType: 'dayBefor
   const key1 = `notifications.${notificationType}.sent`;
   const key2 = `notifications.${notificationType}.sentAt`;
 
-  await db.scheduledOrders.update(orderId, {
+  await dbUpdate('scheduledOrders', orderId, {
       [key1]: true,
       [key2]: new Date().toISOString()
   } as any);
@@ -200,7 +195,7 @@ async function sendNotification(data: { type: string, orderId: string, title: st
     }
 
     // 3. Log to DB
-    await db.notificationLogs.add({
+    await dbAdd('notificationLogs', {
       orderId,
       type,
       title,

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { PedidoPreVenda } from '@/types';
+import { dbUpdate, dbAdd } from '@/lib/db-operations';
 
 /**
  * Remove um pedido da lista de pronta entrega
@@ -39,7 +40,7 @@ export async function removeFromReadyForDelivery(orderId: string, userId: string
     };
 
     // 3. Atualizar pedido
-    await db.pedidosPreVenda.update(orderId, {
+    await dbUpdate('pedidosPreVenda', orderId, {
         status: 'em_preparacao', // Returning to prep
         removedFromReady: removedFromReadyData,
         history: [
@@ -52,10 +53,16 @@ export async function removeFromReadyForDelivery(orderId: string, userId: string
                 previousStatus
             }
         ]
-    });
+    } as any);
     
     // 4. Registrar log de auditoria
-    await db.auditLogs.add({
+    // AuditLogs table not strictly in DbTable union from db-operations if not added yet.
+    // We should probably add auditLogs and scheduledOrders to DbTable type.
+    // For now, let's keep direct dexie access for auditLogs if they don't need sync, 
+    // but they PROBABLY need sync! Let's update `db-operations.ts` too later if needed,
+    // or just use direct db for logs for now to prevent typescript errors.
+    // Wait, let's check `DbTable` type.
+    await dbAdd('auditLogs', {
       orderId,
       action: "remove_from_ready_for_delivery",
       userId,
@@ -72,7 +79,7 @@ export async function removeFromReadyForDelivery(orderId: string, userId: string
         // We only update if it still has canUndo=true to avoid race conditions with actual undo
         const currentOrder = await db.pedidosPreVenda.get(orderId);
         if (currentOrder?.removedFromReady?.canUndo) {
-             await db.pedidosPreVenda.update(orderId, {
+             await dbUpdate('pedidosPreVenda', orderId, {
                 "removedFromReady.canUndo": false
              } as any); // Dexie path update might need casting or full object
         }
@@ -120,7 +127,7 @@ export async function undoRemoveFromReady(orderId: string) {
     // Restaurar status anterior
     const previousStatus = order.removedFromReady.previousStatus as PedidoPreVenda['status'];
     
-    await db.pedidosPreVenda.update(orderId, {
+    await dbUpdate('pedidosPreVenda', orderId, {
         status: previousStatus,
         removedFromReady: {
             timestamp: "", // Clear it or keep null
@@ -141,7 +148,7 @@ export async function undoRemoveFromReady(orderId: string) {
     } as any);
     
     // Registrar log
-    await db.auditLogs.add({
+    await dbAdd('auditLogs', {
       orderId,
       action: "undo_remove_from_ready",
       timestamp: new Date().toISOString(),

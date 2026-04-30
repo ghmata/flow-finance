@@ -9,6 +9,18 @@ export interface Configuracao {
   created_at: string;
 }
 
+export interface SyncQueueItem {
+  id?: number;
+  operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  table: string;
+  recordId: string;
+  data: any;
+  createdAt: string;
+  status: 'pending' | 'error' | 'completed' | 'dead';
+  error?: string;
+  retryCount?: number;
+}
+
 class FlowFinanceDB extends Dexie {
   clientes!: EntityTable<Cliente, 'id'>;
   produtos!: EntityTable<Produto, 'id'>;
@@ -26,6 +38,9 @@ class FlowFinanceDB extends Dexie {
   auditLogs!: EntityTable<AuditLog, 'id'>;
   notificationLogs!: EntityTable<NotificationLog, 'id'>;
 
+  // ⭐ TABELA DE SYNC
+  syncQueue!: EntityTable<SyncQueueItem, 'id'>;
+
   constructor() {
     super('FlowFinanceDB');
     this.version(1).stores({
@@ -36,7 +51,8 @@ class FlowFinanceDB extends Dexie {
       pagamentos: '&id, tipo, referencia_id, cliente_id, data_pagamento, [referencia_id+tipo]',
       despesas: '&id, categoria, data_despesa, status, [categoria+data_despesa]',
       receitas: '&id, categoria, data_receita, origem, [categoria+data_receita]',
-      configuracoes: '&id, chave'
+      configuracoes: '&id, chave',
+      syncQueue: '++id, status, createdAt'
     });
 
     this.version(2).stores({
@@ -121,6 +137,15 @@ class FlowFinanceDB extends Dexie {
       scheduledOrders: '&orderId, scheduledDate, status, [scheduledDate+status]',
       auditLogs: '++id, orderId, action, timestamp',
       notificationLogs: '++id, orderId, type, status, sentAt'
+    });
+
+    // VERSION 5: Add retry tracking to syncQueue + cleanup
+    this.version(5).stores({
+      syncQueue: '++id, status, createdAt'
+    }).upgrade(async (trans) => {
+      console.log('[Migration v5] Limpando itens de sincronização com erro...');
+      await trans.table('syncQueue').where('status').equals('error').delete();
+      console.log('[Migration v5] Concluída.');
     });
   }
 }

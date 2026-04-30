@@ -4,7 +4,7 @@ import type {
   Pagamento, Despesa, Receita, DevedorAgrupado, PedidoItem,
 } from '@/types';
 import { dbAdd, dbUpdate, dbDelete, dbGetAll } from '@/lib/db-operations';
-import { migrateFromLocalStorage } from '@/lib/db-migration';
+import { syncEngine } from '@/lib/sync-engine';
 import { isInCurrentMonth } from '@/lib/date-utils';
 
 function uid() {
@@ -34,6 +34,7 @@ interface AppState {
 
   isLoading: boolean;
   error: string | null;
+  syncStatus: 'online' | 'offline' | 'syncing' | 'error';
 
   // Initialization
   init: () => Promise<void>;
@@ -82,60 +83,67 @@ interface AppState {
   getTop3ProdutosMaisVendidos: () => { nome: string; quantidade: number }[];
 }
 
-export const useStore = create<AppState>((set, get) => ({
-  clientes: [],
-  produtos: [],
-  pedidosPreVenda: [],
-  registrosPosVenda: [],
-  pagamentos: [],
-  despesas: [],
-  receitas: [],
-  isLoading: true,
-  error: null,
+export const useStore = create<AppState>((set, get) => {
+  // Subscribe to SyncEngine Status
+  syncEngine.subscribe((status) => {
+    set({ syncStatus: status });
+  });
 
-  init: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      // 1. Run migration if needed
-      await migrateFromLocalStorage();
+  return {
+    clientes: [],
+    produtos: [],
+    pedidosPreVenda: [],
+    registrosPosVenda: [],
+    pagamentos: [],
+    despesas: [],
+    receitas: [],
+    isLoading: true,
+    error: null,
+    syncStatus: 'offline',
 
-      // 2. Fetch all data
-      const [
-        clientes,
-        produtos,
-        pedidosPreVenda,
-        registrosPosVenda,
-        pagamentos,
-        despesas,
-        receitas
-      ] = await Promise.all([
-        dbGetAll<Cliente>('clientes'),
-        dbGetAll<Produto>('produtos'),
-        dbGetAll<PedidoPreVenda>('pedidosPreVenda'),
-        dbGetAll<RegistroPosVenda>('registrosPosVenda'),
-        dbGetAll<Pagamento>('pagamentos'),
-        dbGetAll<Despesa>('despesas'),
-        dbGetAll<Receita>('receitas')
-      ]);
+    init: async () => {
+      set({ isLoading: true, error: null });
+      try {
+        // 1. Pull data from Supabase if online (Nuvem -> Local)
+        await syncEngine.pullFromCloud();
 
-      set({
-        clientes,
-        produtos,
-        pedidosPreVenda,
-        registrosPosVenda,
-        pagamentos,
-        despesas,
-        receitas,
-        isLoading: false
-      });
-    } catch (err: unknown) {
-      console.error('Failed to initialize store:', err);
-      const msg = err instanceof Error ? err.message : 'Falha ao carregar dados do banco de dados.';
-      set({ error: msg, isLoading: false });
-    }
-  },
+        // 2. Fetch all data local (Atualizado)
+        const [
+          clientes,
+          produtos,
+          pedidosPreVenda,
+          registrosPosVenda,
+          pagamentos,
+          despesas,
+          receitas
+        ] = await Promise.all([
+          dbGetAll<Cliente>('clientes'),
+          dbGetAll<Produto>('produtos'),
+          dbGetAll<PedidoPreVenda>('pedidosPreVenda'),
+          dbGetAll<RegistroPosVenda>('registrosPosVenda'),
+          dbGetAll<Pagamento>('pagamentos'),
+          dbGetAll<Despesa>('despesas'),
+          dbGetAll<Receita>('receitas')
+        ]);
 
-  addCliente: async (nome, telefone, observacoes) => {
+        set({
+          clientes,
+          produtos,
+          pedidosPreVenda,
+          registrosPosVenda,
+          pagamentos,
+          despesas,
+          receitas,
+          isLoading: false
+        });
+      } catch (err: unknown) {
+        console.error('Failed to initialize store:', err);
+        const msg = err instanceof Error ? err.message : 'Falha ao carregar dados do banco de dados.';
+        set({ error: msg, isLoading: false });
+      }
+    },
+
+    addCliente: async (nome, telefone, observacoes) => {
     console.log('[addCliente] Iniciando...', { nome });
     try {
       const id = uid();
@@ -992,4 +1000,5 @@ export const useStore = create<AppState>((set, get) => ({
       .sort((a, b) => b.quantidade - a.quantidade)
       .slice(0, 3);
   }
-}));
+  };
+});

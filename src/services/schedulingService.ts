@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { PedidoPreVenda, ScheduledOrder } from '@/types';
+import { dbAdd, dbUpdate } from '@/lib/db-operations';
 import { format, isBefore, startOfDay, parseISO } from 'date-fns';
 
 /**
@@ -56,10 +57,10 @@ export async function scheduleOrder(
     };
     
     // Salvar no banco
-    await db.scheduledOrders.put(scheduledOrder);
+    await dbAdd('scheduledOrders', scheduledOrder);
     
     // Atualizar status do pedido original
-    await db.pedidosPreVenda.update(orderId, {
+    await dbUpdate('pedidosPreVenda', orderId, {
         status: 'agendado',
         scheduledDate,
         scheduledTime,
@@ -73,10 +74,10 @@ export async function scheduleOrder(
                 userId: options.userId
             }
         ]
-    });
+    } as any);
     
     // Log de auditoria
-    await db.auditLogs.add({
+    await dbAdd('auditLogs', {
       orderId,
       action: "schedule_order",
       userId: options.userId,
@@ -117,7 +118,7 @@ export async function rescheduleOrder(orderId: string, newDate: string, newTime:
     const oldTime = scheduledOrder.scheduledTime;
     
     // Atualizar registro
-    await db.scheduledOrders.update(orderId, {
+    await dbUpdate('scheduledOrders', orderId, {
         scheduledDate: newDate,
         scheduledTime: newTime,
         // Resetar notificações
@@ -132,12 +133,12 @@ export async function rescheduleOrder(orderId: string, newDate: string, newTime:
             reason,
             timestamp: new Date().toISOString()
         }
-    });
+    } as any);
     
     // Atualizar pedido original
     const order = await db.pedidosPreVenda.get(orderId);
     if(order) {
-        await db.pedidosPreVenda.update(orderId, {
+        await dbUpdate('pedidosPreVenda', orderId, {
             scheduledDate: newDate,
             scheduledTime: newTime,
             history: [
@@ -152,11 +153,11 @@ export async function rescheduleOrder(orderId: string, newDate: string, newTime:
                     reason
                 }
             ]
-        });
+        } as any);
     }
     
     // Log
-    await db.auditLogs.add({
+    await dbAdd('auditLogs', {
       orderId,
       action: "reschedule_order",
       timestamp: new Date().toISOString(),
@@ -193,16 +194,16 @@ export async function cancelScheduledOrder(orderId: string, reason: string) {
     }
     
     // Atualizar status
-    await db.scheduledOrders.update(orderId, {
+    await dbUpdate('scheduledOrders', orderId, {
         status: "cancelled",
         cancelledAt: new Date().toISOString(),
         cancelReason: reason
-    });
+    } as any);
     
     // Atualizar pedido original
     const order = await db.pedidosPreVenda.get(orderId);
     if(order) {
-        await db.pedidosPreVenda.update(orderId, {
+        await dbUpdate('pedidosPreVenda', orderId, {
             status: "cancelado",
             history: [
                 ...(order.history || []),
@@ -212,11 +213,11 @@ export async function cancelScheduledOrder(orderId: string, reason: string) {
                     reason
                 }
             ]
-        });
+        } as any);
     }
     
     // Log
-    await db.auditLogs.add({
+    await dbAdd('auditLogs', {
       orderId,
       action: "cancel_scheduled_order",
       timestamp: new Date().toISOString(),

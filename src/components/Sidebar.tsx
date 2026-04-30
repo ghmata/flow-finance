@@ -5,8 +5,12 @@ import {
   Package,
   DollarSign,
   ShoppingCart,
-  TrendingUp
+  TrendingUp,
+  LogOut
 } from 'lucide-react';
+import { SyncIndicator } from './SyncIndicator';
+import { supabase } from '@/lib/supabase';
+import { ImportDialog } from './ImportDialog';
 
 const tabs = [
   { path: '/', label: 'Início', icon: BarChart3 },
@@ -17,9 +21,17 @@ const tabs = [
   { path: '/clientes', label: 'Clientes', icon: Users },
 ];
 
+import { useAuth } from '@/contexts/AuthContext';
+
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/login');
+  };
 
   return (
     <aside className="hidden md:flex flex-col w-64 h-screen fixed left-0 top-0 bg-card border-r border-border z-50 shadow-sm">
@@ -30,7 +42,7 @@ const Sidebar = () => {
         </h1>
       </div>
 
-      <nav className="flex-1 px-4 space-y-2">
+      <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
         {tabs.map((tab) => {
           const active = location.pathname === tab.path;
           return (
@@ -53,10 +65,28 @@ const Sidebar = () => {
         })}
       </nav>
 
-      <div className="p-6 border-t border-border">
-        <p className="text-xs text-muted-foreground text-center">
-          v1.0.0
-        </p>
+      <div className="p-6 border-t border-border flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <SyncIndicator />
+        </div>
+        
+        <ImportDialog />
+        
+        <div className="flex flex-col border-t border-border pt-4 mt-2">
+          {user && (
+            <div className="px-2 mb-2">
+              <p className="text-sm font-medium text-foreground truncate">{user.user_metadata?.nome || user.email}</p>
+              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+            </div>
+          )}
+          <button 
+            onClick={handleLogout}
+            className="flex items-center justify-center gap-2 w-full py-2 text-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Sair</span>
+          </button>
+        </div>
       </div>
     </aside>
   );

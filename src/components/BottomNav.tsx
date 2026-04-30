@@ -8,6 +8,7 @@ import {
   ShoppingCart,
   TrendingUp,
   MoreHorizontal,
+  LogOut,
   LucideIcon
 } from 'lucide-react';
 import {
@@ -17,6 +18,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { SyncIndicator } from './SyncIndicator';
+import { supabase } from '@/lib/supabase';
+import { ImportDialog } from './ImportDialog';
 
 type NavItem = 
   | { type: 'link'; path: string; label: string; icon: LucideIcon }
@@ -35,9 +39,12 @@ const moreMenuItems = [
   { path: '/clientes', label: 'Clientes', icon: Users },
 ];
 
+import { useAuth } from '@/contexts/AuthContext';
+
 const BottomNav = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
   return (
@@ -82,6 +89,34 @@ const BottomNav = () => {
                         </button>
                       );
                     })}
+                  </div>
+                  <div className="mt-6 pt-6 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-foreground">Status do Sistema</span>
+                      <SyncIndicator />
+                    </div>
+                    
+                    <ImportDialog />
+
+                    <div className="flex flex-col border-t border-border pt-4">
+                      {user && (
+                        <div className="px-4 mb-2">
+                          <p className="text-sm font-medium text-foreground truncate">{user.user_metadata?.nome || user.email}</p>
+                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                        </div>
+                      )}
+                      <button 
+                        onClick={async () => {
+                          await supabase.auth.signOut();
+                          setIsMoreOpen(false);
+                          navigate('/login');
+                        }}
+                        className="flex items-center gap-4 p-4 rounded-xl text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <LogOut className="h-5 w-5" />
+                        <span className="text-base font-medium">Sair</span>
+                      </button>
+                    </div>
                   </div>
                 </SheetContent>
               </Sheet>

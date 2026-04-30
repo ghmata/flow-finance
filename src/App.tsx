@@ -2,33 +2,35 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import BottomNav from "./components/BottomNav";
 import Dashboard from "./pages/Dashboard";
 import Clientes from "./pages/Clientes";
-import Produtos from "./pages/Produtos"; // Added import
+import Produtos from "./pages/Produtos";
 import Devedores from "./pages/Devedores";
 import Pedidos from "./pages/Pedidos";
 import Orcamento from "./pages/Orcamento";
 import NotFound from "./pages/NotFound";
 import Sidebar from "./components/Sidebar";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { BackupBanner } from "./components/BackupBanner";
+import AuthGuard from "./components/AuthGuard";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
+import { AuthProvider } from "./contexts/AuthContext";
 
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
-import { seedDatabase } from "@/lib/seed-database";
-
-const queryClient = new QueryClient();
 
 // Import hook
 import { useScheduler } from "@/hooks/useScheduler";
 
-const App = () => {
-  useScheduler(); // Start background scheduler
-  
-  // Import verification script (helper) - Uncomment to run verification
-  // import("@/test/verify-schedule");
+const queryClient = new QueryClient();
+
+// ─── Layout Protegido ─────────────────────────────────────────────────────────
+// Componente interno que requer autenticação e inicializa o store de dados.
+const ProtectedLayout = () => {
+  useScheduler(); // Inicia scheduler em background
 
   const initStore = useStore((state) => state.init);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -36,10 +38,10 @@ const App = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        await seedDatabase();
+        // seedDatabase() removido — dados vêm do Dexie/Supabase (Fase 3)
         initStore();
       } catch (error) {
-        console.error("Failed to initialize app:", error);
+        console.error("Falha ao inicializar app:", error);
       } finally {
         setIsInitializing(false);
       }
@@ -47,8 +49,8 @@ const App = () => {
     init();
   }, [initStore]);
 
-  // Guard: re-inicializa o store quando o app volta do background
-  // Previne o erro NotFound causado por tab discarding do navegador
+  // Guard: re-inicializa o store quando o app volta do background.
+  // Previne o erro NotFound causado por tab discarding do navegador.
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -77,36 +79,60 @@ const App = () => {
   }
 
   return (
+    <div className="flex min-h-screen bg-background text-foreground">
+      {/* Sidebar visível apenas no desktop */}
+      <Sidebar />
+
+      {/* Área principal */}
+      <main className="flex-1 md:ml-64 relative pb-24 md:pb-6">
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/clientes" element={<Clientes />} />
+            <Route path="/produtos" element={<Produtos />} />
+            <Route path="/devedores" element={<Devedores />} />
+            <Route path="/pedidos" element={<Pedidos />} />
+            <Route path="/orcamento" element={<Orcamento />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </ErrorBoundary>
+      </main>
+
+      {/* BottomNav visível apenas no mobile */}
+      <BottomNav />
+    </div>
+  );
+};
+
+// ─── App Root ────────────────────────────────────────────────────────────────
+
+const App = () => {
+  return (
     <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <div className="flex min-h-screen bg-background text-foreground">
-          {/* Sidebar visible only on desktop */}
-          <Sidebar />
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <AuthProvider>
+            <Routes>
+              {/* Rotas públicas — acessíveis sem autenticação */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          {/* Main content area */}
-          <main className="flex-1 md:ml-64 relative pb-24 md:pb-6">
-            <BackupBanner />
-            <ErrorBoundary>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/clientes" element={<Clientes />} />
-                <Route path="/produtos" element={<Produtos />} />
-                <Route path="/devedores" element={<Devedores />} />
-                <Route path="/pedidos" element={<Pedidos />} />
-                <Route path="/orcamento" element={<Orcamento />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </ErrorBoundary>
-          </main>
-
-          {/* BottomNav visible only on mobile */}
-          <BottomNav />
-        </div>
-      </BrowserRouter>
-    </TooltipProvider>
+              {/* Rotas protegidas — AuthGuard redireciona para /login se sem sessão */}
+              <Route
+                path="/*"
+                element={
+                  <AuthGuard>
+                    <ProtectedLayout />
+                  </AuthGuard>
+                }
+              />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
     </QueryClientProvider>
   );
 };

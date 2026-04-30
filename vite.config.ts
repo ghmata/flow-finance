@@ -2,9 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { VitePWA } from "vite-plugin-pwa";
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
@@ -13,10 +14,11 @@ export default defineConfig({
     },
   },
   esbuild: {
-    drop: ['console', 'debugger'],
+    drop: mode === 'production' ? ['console', 'debugger'] : [],
   },
   plugins: [
     react(),
+    nodePolyfills(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "pwa-512x512.png"],
@@ -43,6 +45,9 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
+        // Bundle principal é ~2.26MB após adicionar @supabase/supabase-js.
+        // Aumentamos o limite para 3MB. A divisão de chunks será feita na Fase 5 (Polish).
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MiB
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -76,9 +81,21 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'xlsx-vendor': ['xlsx'],
+          'supabase-vendor': ['@supabase/supabase-js'],
+          'react-vendor': ['react', 'react-dom', 'react-router-dom', 'zustand'],
+          'ui-vendor': ['lucide-react', 'date-fns', 'clsx', 'tailwind-merge']
+        }
+      }
+    }
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
   },
-});
+}));
