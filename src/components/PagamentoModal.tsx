@@ -38,6 +38,7 @@ const PagamentoModal = ({
 }: PagamentoModalProps) => {
   const [forma, setForma] = useState('PIX');
   const [valorStr, setValorStr] = useState('');
+  const [isPending, setIsPending] = useState(false);
   const { registrarPagamento, registrarPagamentoEmLote } = useStore();
   const isMobile = useIsMobile();
 
@@ -48,6 +49,7 @@ const PagamentoModal = ({
     if (open) {
         setForma('PIX');
         setValorStr(valor.toFixed(2).replace('.', ','));
+        setIsPending(false);
     } else {
         // Blur active element when closing to prevent aria-hidden issues
         const timer = setTimeout(() => {
@@ -60,18 +62,27 @@ const PagamentoModal = ({
     }
   }, [open, valor]);
 
-  const handleConfirmar = () => {
-    const valorFinal = parseCurrency(valorStr);
-    
-    if (onConfirm) {
-        onConfirm(forma, valorFinal);
-    } else if (itemId) {
-        // Pagamento granular de item — envia valor editado como valor_pago_custom
-        registrarPagamentoEmLote(tipo, referenciaId, [itemId], forma, valorFinal);
-    } else {
-       registrarPagamento(tipo, referenciaId, forma);
+  const handleConfirmar = async () => {
+    if (isPending) return;
+    setIsPending(true);
+
+    try {
+      const valorFinal = parseCurrency(valorStr);
+      
+      if (onConfirm) {
+          onConfirm(forma, valorFinal);
+      } else if (itemId) {
+          // Pagamento granular de item — envia valor editado como valor_pago_custom
+          await registrarPagamentoEmLote(tipo, referenciaId, [itemId], forma, valorFinal);
+      } else {
+         await registrarPagamento(tipo, referenciaId, forma);
+      }
+      onClose();
+    } catch (error) {
+      console.error('[PagamentoModal] Erro ao confirmar:', error);
+    } finally {
+      setIsPending(false);
     }
-    onClose();
   };
 
   const PagamentoForm = (
@@ -133,11 +144,11 @@ const PagamentoModal = ({
         </div>
 
         <div className="p-4 pt-0 flex gap-3 justify-end bg-background z-10">
-          <Button variant="outline" onClick={onClose} className="h-12 flex-1 sm:flex-none sm:h-11 px-6 rounded-xl">
+          <Button variant="outline" onClick={onClose} disabled={isPending} className="h-12 flex-1 sm:flex-none sm:h-11 px-6 rounded-xl">
             Cancelar
           </Button>
-          <Button onClick={handleConfirmar} className="h-12 flex-1 sm:flex-none sm:h-11 px-6 rounded-xl text-base font-semibold">
-            Confirmar
+          <Button onClick={handleConfirmar} disabled={isPending} className="h-12 flex-1 sm:flex-none sm:h-11 px-6 rounded-xl text-base font-semibold">
+            {isPending ? '⏳ Processando...' : 'Confirmar'}
           </Button>
         </div>
       </DialogContent>
@@ -146,3 +157,4 @@ const PagamentoModal = ({
 };
 
 export default PagamentoModal;
+

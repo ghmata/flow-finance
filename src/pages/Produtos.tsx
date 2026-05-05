@@ -45,7 +45,6 @@ const Produtos = () => {
     if (!prodNome.trim() || isNaN(preco) || preco <= 0) return;
     
     setIsSubmitting(true);
-    setIsSubmitting(true);
     try {
       let success = false;
       if (editPId) {

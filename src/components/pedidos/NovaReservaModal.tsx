@@ -61,18 +61,16 @@ export const NovaReservaModal = ({
       if (editId && initialData) {
         setCliente(initialData.cliente_id);
         
-        // Handle date
-        if (initialData.data_entrega) {
-             // Parse logic if needed, assumes string YYYY-MM-DD or ISO
-             // If stored as "DD/MM/YYYY", need parsing. 
-             // Looking at Pedidos.tsx, it seems data_pedido is what is used often, but for reservation we need a scheduled date.
-             // The prompt asks for "Reservar para a data".
-             // Let's assume we store this in `data_entrega` or `data_pedido`?
-             // `PedidoPreVenda` has `data_entrega`.
-             // If initialData has it, set it.
+        // Handle date — usar scheduledDate (campo correto para data de reserva)
+        if (initialData.scheduledDate) {
              try {
-                // Try parsing standard formats
-                const d = new Date(initialData.data_entrega); // or parse from string format
+                const [y, m, d] = initialData.scheduledDate.split('-').map(Number);
+                const parsedDate = new Date(y, m - 1, d);
+                if (!isNaN(parsedDate.getTime())) setDate(parsedDate);
+             } catch (e) { console.error("Invalid date", e); }
+        } else if (initialData.data_entrega) {
+             try {
+                const d = new Date(initialData.data_entrega);
                 if (!isNaN(d.getTime())) setDate(d);
              } catch (e) { console.error("Invalid date", e); }
         } else {
@@ -181,7 +179,7 @@ export const NovaReservaModal = ({
       const payload = {
           cliente_id: cliente,
           itens: finalItens,
-          data_entrega: formattedDate 
+          scheduledDate: formattedDate
       };
 
       let success = false;

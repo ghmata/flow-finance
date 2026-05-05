@@ -7,6 +7,7 @@ export class SyncEngine {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private listeners: Set<(status: 'online' | 'offline' | 'syncing' | 'error') => void> = new Set();
   private status: 'online' | 'offline' | 'syncing' | 'error' = 'offline';
+  private hydrationComplete = false;
 
   constructor() {
     // Monitorar conectividade
@@ -59,6 +60,68 @@ export class SyncEngine {
   }
 
   /**
+   * Verifica se o usuário atual é o mesmo que estava ativo no dispositivo.
+   * Se houve troca de sessão, limpa todo o cache local para evitar
+   * vazamento de dados entre contas.
+   *
+   * DEVE ser chamado ANTES de qualquer pullFromCloud ou reconcileLocalData.
+   */
+  public async setActiveUser(userId: string): Promise<{ userChanged: boolean }> {
+    const existing = await db.configuracoes.where('chave').equals('active_user_id').first();
+
+    if (existing?.valor === userId) {
+      console.log('[SessionGuard] Mesmo usuário. Nenhuma limpeza necessária.', {
+        user: userId.substring(0, 8)
+      });
+      return { userChanged: false };
+    }
+
+    // Troca de usuário detectada — limpar TUDO
+    const previousUser = existing?.valor?.substring(0, 8) || 'nenhum';
+    console.warn('[SessionGuard] Troca de usuário detectada. Limpando cache local.', {
+      previousUser,
+      newUser: userId.substring(0, 8)
+    });
+
+    const dataTables = [
+      'clientes', 'produtos', 'pedidosPreVenda', 'registrosPosVenda',
+      'pagamentos', 'despesas', 'receitas', 'scheduledOrders',
+      'auditLogs', 'notificationLogs', 'configuracoes'
+    ];
+
+    for (const table of dataTables) {
+      try {
+        await (db as any)[table].clear();
+      } catch (e) {
+        console.warn(`[SessionGuard] Falha ao limpar tabela ${table}:`, e);
+      }
+    }
+
+    // Limpar fila de sync do usuário anterior (itens órfãos)
+    await db.syncQueue.clear();
+
+    // Registrar novo usuário ativo
+    await db.configuracoes.put({
+      id: crypto.randomUUID(),
+      chave: 'active_user_id',
+      valor: userId,
+      created_at: new Date().toISOString()
+    });
+
+    console.log('[SessionGuard] Cache limpo. Pronto para hidratar dados do novo usuário.');
+    return { userChanged: true };
+  }
+
+  /**
+   * Indica se o primeiro ciclo de download (Cloud → Local) já foi concluído.
+   * Enquanto false, uploads NÃO devem ser disparados para evitar
+   * enviar dados vazios/incompletos à nuvem.
+   */
+  public isHydrated(): boolean {
+    return this.hydrationComplete;
+  }
+
+  /**
    * Adiciona uma operação à fila de sincronização (chamado localmente)
    */
   public async enqueue(
@@ -67,6 +130,12 @@ export class SyncEngine {
     recordId: string | number,
     data?: any
   ) {
+    // Bloquear enqueue antes da primeira hidratação
+    if (!this.hydrationComplete) {
+      console.warn('[SyncEngine] Enqueue bloqueado: hidratação ainda não concluída.');
+      return;
+    }
+
     const item: SyncQueueItem = {
       operation,
       table,
@@ -208,6 +277,10 @@ export class SyncEngine {
   /**
    * Puxa todos os dados do Supabase para o Dexie (Nuvem -> Local)
    * Usado principalmente no login / inicialização.
+   *
+   * IMPORTANTE: A nuvem é a fonte da verdade. Tabelas locais são limpas
+   * incondicionalmente antes de receber os dados atualizados.
+   * Isso é seguro porque flush() roda ANTES deste método (garantido pelo init do store).
    */
   public async pullFromCloud() {
     if (!navigator.onLine) return false;
@@ -219,7 +292,6 @@ export class SyncEngine {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Não autenticado");
 
-      // Otimização: Paralelizar as requisições principais
       const tables = [
         'clientes', 
         'produtos', 
@@ -230,26 +302,28 @@ export class SyncEngine {
         'receitas',
         'scheduledOrders',
         'auditLogs',
-        'notificationLogs',
-        'configuracoes'
+        'notificationLogs'
       ];
 
       for (const table of tables) {
         try {
           const cloudData = await sbGetAll(table);
           
+          // Cloud-wins: limpar SEMPRE, independente se a nuvem tem dados.
+          // Isso previne dados órfãos de outro usuário permanecerem no device.
+          await (db as any)[table].clear();
+          
           if (cloudData && cloudData.length > 0) {
-            // Limpa dados locais antigos
-            // Atenção: Esta é uma abordagem agressiva que confia totalmente na nuvem.
-            // Para produção, uma estratégia de 'last_modified' (delta sync) é melhor.
-            await (db as any)[table].clear();
             await (db as any)[table].bulkAdd(cloudData);
           }
         } catch (e) {
           console.warn(`Falha ao puxar dados da tabela ${table}:`, e);
-          // Continua para a próxima tabela mesmo se uma falhar
         }
       }
+
+      // Marcar hidratação como completa — agora é seguro enfileirar operações
+      this.hydrationComplete = true;
+      console.log('[SyncEngine] Hidratação completa. Upload habilitado.');
 
       this.updateStatus('online');
       return true;
@@ -271,9 +345,32 @@ export class SyncEngine {
    */
   public async reconcileLocalData() {
     try {
+      // Guard: Verificar se o user_id local coincide com a sessão ativa
+      const { data: { session } } = await supabase.auth.getSession();
+      const activeUser = await db.configuracoes.where('chave').equals('active_user_id').first();
+
+      if (!session?.user?.id || activeUser?.valor !== session.user.id) {
+        console.warn('[SessionGuard] reconcileLocalData abortado: user_id mismatch ou sem sessão.');
+        return;
+      }
+
       const configuracoes = await db.configuracoes.where('chave').equals('migration_v4_completed').first();
       if (configuracoes?.valor === 'true') {
         return; // Já foi migrado
+      }
+
+      // Se pullFromCloud já trouxe dados, não precisa reconciliar dados legados
+      const clientesCount = await db.clientes.count();
+      if (clientesCount > 0) {
+        console.log('[SyncEngine] Dados já existem da nuvem. Pulando reconciliação legada.');
+        // Marcar como concluído para não tentar novamente
+        await db.configuracoes.put({
+          id: crypto.randomUUID(),
+          chave: 'migration_v4_completed',
+          valor: 'true',
+          created_at: new Date().toISOString()
+        });
+        return;
       }
 
       // Vamos percorrer as tabelas principais e enfileirar criações

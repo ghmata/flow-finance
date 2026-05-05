@@ -4,6 +4,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from 'react';
 import type { Session, User, AuthError } from '@supabase/supabase-js';
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const sessionGuardRunning = useRef(false);
 
   // Monitora conectividade de rede
   useEffect(() => {
@@ -70,11 +72,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Reconcilia dados legados quando o usuário loga
+  // SessionGuard: isolamento de dados + hidratação na troca de usuário
   useEffect(() => {
-    if (user && isOnline) {
-      syncEngine.reconcileLocalData().catch(console.error);
-    }
+    if (!user || !isOnline || sessionGuardRunning.current) return;
+
+    sessionGuardRunning.current = true;
+
+    const runSessionGuard = async () => {
+      try {
+        // 1. Verificar troca de usuário e limpar cache se necessário
+        await syncEngine.setActiveUser(user.id);
+
+        // 2. Nuvem → Local (fonte da verdade no login)
+        // O pullFromCloud é chamado pelo store.init(), não precisa chamar aqui.
+        // Apenas reconciliar dados legados se necessário.
+        await syncEngine.reconcileLocalData();
+      } catch (error) {
+        console.error('[SessionGuard] Erro no fluxo de login:', error);
+      } finally {
+        sessionGuardRunning.current = false;
+      }
+    };
+
+    runSessionGuard();
   }, [user, isOnline]);
 
   // ─── Métodos de Autenticação ────────────────────────────────────────────────

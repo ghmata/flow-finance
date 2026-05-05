@@ -104,10 +104,14 @@ export const useStore = create<AppState>((set, get) => {
     init: async () => {
       set({ isLoading: true, error: null });
       try {
-        // 1. Pull data from Supabase if online (Nuvem -> Local)
+        // 1. Flush: envia dados pendentes (Local → Nuvem) antes de sobrescrever
+        // Isso garante que dados criados offline não são perdidos pelo clear() do pull
+        await syncEngine.flush();
+
+        // 2. Pull: atualiza dados (Nuvem → Local) como fonte da verdade
         await syncEngine.pullFromCloud();
 
-        // 2. Fetch all data local (Atualizado)
+        // 3. Fetch all data local (Atualizado)
         const [
           clientes,
           produtos,
