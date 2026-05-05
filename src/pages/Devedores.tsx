@@ -429,7 +429,7 @@ const Devedores = () => {
                                         )}
                                       </div>
                                       <p className="text-xs text-muted-foreground">
-                                        📅 há {item.dias} dia(s) • {item.tipo === 'prevenda' ? '📦 Reserva' : '🛒 Pronta Entrega'}
+                                        📅 {item.data && isValid(parseISO(item.data)) ? format(parseISO(item.data), 'dd/MM/yyyy') : 'S/D'} (há {item.dias} dias) • {item.tipo === 'prevenda' ? '📦 Reserva' : '🛒 Pronta Entrega'}
                                       </p>
                                     </div>
                                     <p className="font-bold text-lg text-indigo-600 flex-shrink-0">{fmt(item.valor)}</p>
